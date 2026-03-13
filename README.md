@@ -13,11 +13,13 @@ license: MIT
 
 AI-powered bioinformatics research platform for genomic analysis and disease detection.
 
-## 📋 Descripción
+## 📋 Description
+
+AI Genomics Lab is a local-first platform for genomic analysis that combines Bioinformatics, AI, LLM, and Graph Databases. The system can analyze patient DNA, detect mutations, link them to diseases, and generate scientific reports using AI agents.
 
 ## 🧬 AI Genomics Research Platform
 
-## Bioinformatics system powered by AI to detect genetic diseases from a patient’s DNA using:
+Bioinformatics system powered by AI to detect genetic diseases from a patient's DNA using:
 
 - LLMs
 - Graph Database
@@ -25,42 +27,40 @@ AI-powered bioinformatics research platform for genomic analysis and disease det
 - Scientific agents
 - Bioinformatics pipelines
 
-## 🎯 Estado del Proyecto
+## 🎯 Project Status
 
-**Estado: ✅ COMPLETADO (100%)**
+**Status: ✅ COMPLETED (100%)**
 
-El proyecto ha alcanzado todas las fases de desarrollo planificadas:
+The project has reached all planned development phases:
 
-| Fase | Descripción | Estado |
-|------|-------------|--------|
-| Fase 1 | Infraestructura Docker | ✅ |
-| Fase 2 | Pipeline Bioinformático | ✅ |
-| Fase 3 | Base de Datos Grafo | ✅ |
-| Fase 4 | Integración LLM | ✅ |
-| Fase 5 | Sistema de Agentes | ✅ |
-| Fase 6 | Frontend | ✅ |
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1 | Docker Infrastructure | ✅ |
+| Phase 2 | Bioinformatics Pipeline | ✅ |
+| Phase 3 | Graph Database | ✅ |
+| Phase 4 | LLM Integration | ✅ |
+| Phase 5 | Agent System | ✅ |
+| Phase 6 | Frontend | ✅ |
 
-## 🚀 Características
+## 🚀 Features
 
-- **Pipeline Bioinformático**: FASTQ → BAM → VCF con BWA, SAMtools, bcftools y GATK
-- **Grafo de Conocimiento**: Neo4j con nodos Gene, Mutation, Disease, Protein, Drug y Paper
-- **Integración LLM**: OpenRouter API para explicación de mutaciones y generación de informes
-- **Agentes IA**: Sistema multi-agente (VariantAgent, GraphAgent, LiteratureAgent, ReportAgent)
-- **UI Moderna**: Next.js con visualización Cytoscape.js e IGV Genome Browser
-- **Deep Learning**: Modelos para análisis de secuencias genéticas
-- **Deep Learning**: Modelos para análisis de secuencias genéticas
+- **Bioinformatics Pipeline**: FASTQ → BAM → VCF with BWA, SAMtools, bcftools, and GATK
+- **Knowledge Graph**: Neo4j with Gene, Mutation, Disease, Protein, Drug, and Paper nodes
+- **LLM Integration**: OpenRouter API for mutation explanation and report generation
+- **AI Agents**: Multi-agent system (VariantAgent, GraphAgent, LiteratureAgent, ReportAgent)
+- **Modern UI**: Next.js with Cytoscape.js visualization and IGV Genome Browser
 
-## 🏗️ Arquitectura
+## 🏗️ Architecture
 
 ```mermaid
 graph TB
-    subgraph Input["📥 Entrada de Datos"]
+    subgraph Input["📥 Data Input"]
         FASTQ[FASTQ Files]
         FASTA[FASTA Files]
         BAM[BAM Files]
     end
 
-    subgraph Pipeline["🧬 Pipeline Bioinformático"]
+    subgraph Pipeline["🧬 Bioinformatics Pipeline"]
         QC[Quality Control]
         ALIGN[Alignment BWA-MEM]
         SORT[Sorting SAMtools]
@@ -68,13 +68,13 @@ graph TB
         VCF[VCF Output]
     end
 
-    subgraph Storage["💾 Almacenamiento"]
+    subgraph Storage["💾 Storage"]
         MINIO[MinIO Object Store]
         POSTGRES[PostgreSQL]
         NEO4J[Neo4j Graph DB]
     end
 
-    subgraph AI["🤖 Capa de IA"]
+    subgraph AI["🤖 AI Layer"]
         VA[Variant Agent]
         GA[Graph Agent]
         LA[Literature Agent]
@@ -86,7 +86,7 @@ graph TB
         FASTAPI[FastAPI Backend]
     end
 
-    subgraph UI["🎨 Interfaz de Usuario"]
+    subgraph UI["🎨 User Interface"]
         NEXT[Next.js Frontend]
         GRAPH[Cytoscape.js Graph]
         TABLE[Variant Table]
@@ -123,7 +123,7 @@ graph TB
     TABLE --> FASTAPI
 ```
 
-## 🔄 Flujo de Datos
+## 🔄 Data Flow
 
 ```mermaid
 sequenceDiagram
@@ -162,15 +162,15 @@ sequenceDiagram
     LLM->>Frontend: Scientific report
 ```
 
-## 📁 Estructura del Proyecto
+## 📁 Project Structure
 
 ```
 AI-Genomics-Lab/
 ├── api/                    # FastAPI backend
-│   ├── main.py            # API endpoints (550 líneas)
+│   ├── main.py            # API endpoints (550 lines)
 │   ├── requirements.txt   # Python dependencies
 │   └── Dockerfile         # API container
-├── agents/                # Sistema de Agentes IA
+├── agents/                # AI Agent System
 │   └── __init__.py       # Multi-agent implementation (12,858 bytes)
 ├── services/              # Core services
 │   ├── llm_client.py     # OpenRouter client
@@ -204,37 +204,37 @@ AI-Genomics-Lab/
 
 ## 🛠️ Tech Stack
 
-| Categoría | Tecnología |
-|-----------|------------|
+| Category | Technology |
+|----------|------------|
 | **Backend** | FastAPI (Python 3.11+) |
-| **Base de Datos** | PostgreSQL 15, Neo4j 5.14 |
-| **Almacenamiento** | MinIO |
-| **IA/LLM** | OpenRouter, LangGraph |
+| **Database** | PostgreSQL 15, Neo4j 5.14 |
+| **Storage** | MinIO |
+| **AI/LLM** | OpenRouter, LangGraph |
 | **Frontend** | Next.js 14, React 18, Tailwind CSS |
-| **Visualización** | Cytoscape.js, IGV.js, Recharts |
-| **Bioinformática** | BWA, SAMtools, bcftools, GATK |
+| **Visualization** | Cytoscape.js, IGV.js, Recharts |
+| **Bioinformatics** | BWA, SAMtools, bcftools, GATK |
 
-## 🌐 Servicios y Puertos
+## 🌐 Services and Ports
 
-| Servicio | Puerto | Descripción |
-|----------|--------|-------------|
+| Service | Port | Description |
+|---------|------|-------------|
 | Frontend | 3000 | Next.js UI |
 | API | 8000 | FastAPI backend |
 | Neo4j | 7474/7687 | Graph database |
 | PostgreSQL | 5432 | Relational database |
 | MinIO | 9000/9001 | Object storage |
 
-## 📊 Datos en Neo4j
+## 📊 Data in Neo4j
 
-### Nodos Cargados
+### Loaded Nodes
 
-| Tipo | Cantidad | Ejemplos |
-|------|----------|----------|
+| Type | Count | Examples |
+|------|-------|----------|
 | **Genes** | 6 | BRCA1, BRCA2, TP53, EGFR, KRAS, PIK3CA |
-| **Mutaciones** | 6 | c.68_69delAG, c.5266dupC, R273H, L858R, G12D, E545K |
-| **Enfermedades** | 5 | Breast Cancer, Ovarian Cancer, Li-Fraumeni, Lung Cancer, Colon Cancer |
+| **Mutations** | 6 | c.68_69delAG, c.5266dupC, R273H, L858R, G12D, E545K |
+| **Diseases** | 5 | Breast Cancer, Ovarian Cancer, Li-Fraumeni, Lung Cancer, Colon Cancer |
 
-### Relaciones
+### Relationships
 
 ```
 (Gene)-[:HAS_MUTATION]->(Mutation)
@@ -242,89 +242,89 @@ AI-Genomics-Lab/
 (Gene)-[:INTERACTS_WITH]->(Gene)
 ```
 
-## 🎨 Componentes del Frontend
+## 🎨 Frontend Components
 
 ### GraphView
-Visualización interactiva del grafo de conocimiento usando Cytoscape.js:
-- Nodos: Genes (azul), Mutaciones (rojo), Enfermedades (verde)
-- Relaciones: HAS_MUTATION, CAUSES, INTERACTS_WITH
-- Interactivo: click para seleccionar, zoom, pan
+Interactive knowledge graph visualization using Cytoscape.js:
+- Nodes: Genes (blue), Mutations (red), Diseases (green)
+- Relationships: HAS_MUTATION, CAUSES, INTERACTS_WITH
+- Interactive: click to select, zoom, pan
 
 ### VariantTable
-Tabla de variantes con:
-- Búsqueda por gen o posición
-- Filtros por tipo (SNP, Indel, Structural)
-- Clasificación de patogenicidad (pathogenic, likely_pathogenic, uncertain, likely_benign, benign)
-- Exportación de datos
+Variant table with:
+- Search by gene or position
+- Filters by type (SNP, Indel, Structural)
+- Pathogenicity classification (pathogenic, likely_pathogenic, uncertain, likely_benign, benign)
+- Data export
 
 ### GenomeBrowser
-Integración con IGV.js:
-- Navegación por locus cromosómico
+IGV.js integration:
+- Chromosomal locus navigation
 - Quick navigation: BRCA1, TP53, EGFR, KRAS
-- Soporte para hg38
+- hg38 support
 
-## 📡 Endpoints de la API
+## 📡 API Endpoints
 
 ### Health
-- `GET /` - Información de la API
-- `GET /health` - Estado de salud
+- `GET /` - API information
+- `GET /health` - Health status
 
 ### Analysis
-- `POST /analysis/upload` - Subir archivo genómico
-- `POST /analysis/run` - Ejecutar pipeline
-- `GET /analysis/status` - Estado del pipeline
+- `POST /analysis/upload` - Upload genome file
+- `POST /analysis/run` - Run pipeline
+- `GET /analysis/status` - Pipeline status
 
 ### Graph
-- `GET /graph/genes/{gene}` - Información de gen
-- `GET /graph/mutations/{mutation}` - Información de mutación
-- `GET /graph/diseases/{disease}` - Información de enfermedad
-- `GET /graph/search` - Buscar en el grafo
-- `GET /graph/statistics` - Estadísticas del grafo
+- `GET /graph/genes/{gene}` - Gene information
+- `GET /graph/mutations/{mutation}` - Mutation information
+- `GET /graph/diseases/{disease}` - Disease information
+- `GET /graph/search` - Search graph
+- `GET /graph/statistics` - Graph statistics
 
 ### Agents
-- `POST /agents/analyze` - Analizar variante
-- `POST /agents/report` - Generar informe
-- `POST /agents/complete-analysis` - Análisis completo
+- `POST /agents/analyze` - Analyze variant
+- `POST /agents/report` - Generate report
+- `POST /agents/complete-analysis` - Complete analysis
 
 ### LLM
-- `POST /llm/explain` - Explicar mutación
-- `POST /llm/generate` - Generación de texto
+- `POST /llm/explain` - Explain mutation
+- `POST /llm/generate` - Text generation
 
-## 🚦 Primeros Pasos
+## 🚦 Getting Started
 
-### Prerrequisitos
+### Prerequisites
 
 - Docker & Docker Compose
 - Python 3.11+
 - Node.js 20+
 
-### Instalación
+### Installation
 
-1. Clonar el repositorio:
+1. Clone the repository:
 ```bash
 git clone https://github.com/rendergraf/AI-Genomics-Lab.git
 cd AI-Genomics-Lab
 ```
 
-2. Configurar entorno:
+2. Configure environment:
 ```bash
 cp .env.example .env
-# Editar .env con tus API keys
+# Edit .env with your API keys
 ```
 
-3. Iniciar servicios:
+3. Start services:
 ```bash
 cd docker
 docker-compose up -d
 ```
 
-4. Acceder a la aplicación:
+4. Access the application:
    - Frontend: http://localhost:3000
    - API: http://localhost:8000
    - Neo4j: http://localhost:7474
    - API Docs: http://localhost:8000/docs
 
-### Desarrollo
+### Development
 
 #### API
 ```bash
@@ -340,38 +340,38 @@ npm install
 npm run dev
 ```
 
-## 🤖 Sistema de Agentes
+## 🤖 Agent System
 
 ### VariantAgent
-Analiza variantes específicas consultando el grafo de conocimiento y generando interpretaciones clínicas.
+Analyzes specific variants by querying the knowledge graph and generating clinical interpretations.
 
 ### GraphAgent
-Realiza consultas al grafo Neo4j para recuperar información sobre genes, mutaciones y enfermedades.
+Performs queries to Neo4j to retrieve information about genes, mutations, and diseases.
 
 ### LiteratureAgent
-Recupera y analiza literatura científica relevante para las variantes detectadas.
+Retrieves and analyzes relevant scientific literature for detected variants.
 
 ### ReportAgent
-Genera informes científicos completos incluyendo resumen ejecutivo, metodología, análisis de variantes e interpretación clínica.
+Generates complete scientific reports including executive summary, methodology, variant analysis, and clinical interpretation.
 
 ### AnalysisOrchestrator
-Orquestador que coordina todos los agentes para análisis completos.
+Orchestrator that coordinates all agents for complete analysis.
 
-## 📈 Uso de la API
+## 📈 API Usage
 
-### Ejemplo: Análisis de Variante
+### Example: Variant Analysis
 
 ```python
 import requests
 
-# Analizar variante
+# Analyze variant
 response = requests.post(
     "http://localhost:8000/agents/analyze",
     json={"variant_id": "R273H"}
 )
 print(response.json())
 
-# Generar informe
+# Generate report
 response = requests.post(
     "http://localhost:8000/agents/report",
     json={
@@ -382,7 +382,7 @@ response = requests.post(
 print(response.json())
 ```
 
-## 📝 Configuración de Variables de Entorno
+## 📝 Environment Variables Configuration
 
 ```env
 # Database
@@ -402,27 +402,27 @@ MINIO_SECRET_KEY=genomics
 OPENROUTER_API_KEY=your_api_key_here
 ```
 
-## 🔒 Seguridad
+## 🔒 Security
 
-- Los datos genómicos son sensibles
-- No almacenar claves API en código
-- Usar variables de entorno
-- Considerar principios GDPR
+- Genomic data is sensitive
+- Do not store API keys in code
+- Use environment variables
+- Consider GDPR principles
 
 ## 🧪 Testing
 
-Los módulos críticos incluyen tests:
-- Pipeline bioinformático
-- Parser de variantes
-- Ingestión del grafo
+Critical modules include tests:
+- Bioinformatics pipeline
+- Variant parser
+- Graph ingestion
 
-## 🤝 Contribuciones
+## 🤝 Contributions
 
-¡Las contribuciones son bienvenidas!
+Contributions are welcome!
 
-## 📄 Licencia
+## 📄 License
 
-MIT License - Ver LICENSE para detalles.
+MIT License - See LICENSE for details.
 
 ---
 
