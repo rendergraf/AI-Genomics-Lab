@@ -1,0 +1,35 @@
+# FastAPI and server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Database
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Neo4j
+neo4j==5.14.1
+
+# MinIO
+minio==7.2.0
+
+# LLM and AI
+openrouter==0.3.1
+httpx==0.26.0
+
+# LangChain and LangGraph
+langchain==0.1.4
+langchain-openai==0.0.5
+langgraph==0.0.20
+
+# Utilities
+python-dotenv==1.0.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# BioPython
+biopython==1.83
+
+# Network analysis
+networkx==3.2.1
