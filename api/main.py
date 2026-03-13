@@ -62,9 +62,33 @@ async def lifespan(app: FastAPI):
 # Create FastAPI application
 app = FastAPI(
     title="🧬 AI Genomics Lab API",
-    description="Local-first platform for genomic analysis using Bioinformatics + AI + LLM + Graph Databases",
+    description="""
+AI Genomics Lab API - Local-first platform for genomic analysis using Bioinformatics + AI + LLM + Graph Databases.
+
+Features:
+- Upload FASTQ/FASTA/BAM files
+- Variant calling with bcftools
+- Query knowledge graph for gene/mutation/disease info
+- Generate scientific reports with AI
+- Explain mutations using LLM
+
+Quick Start:
+1. Start services: docker-compose up -d
+2. Upload genome files via /analysis/upload
+3. Run analysis via /analysis/run
+4. Query graph via /graph/genes/{gene}
+5. Generate reports via /agents/report
+""",
     version="0.1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=[
+        {"name": "Analysis", "description": "🧬 Bioinformatics pipeline endpoints"},
+        {"name": "Graph", "description": "🔗 Knowledge graph endpoints"},
+        {"name": "Agents", "description": "🤖 AI agent endpoints"},
+        {"name": "LLM", "description": "🧠 LLM integration endpoints"},
+    ]
 )
 
 # CORS middleware

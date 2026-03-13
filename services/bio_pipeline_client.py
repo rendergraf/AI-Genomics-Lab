@@ -32,19 +32,22 @@ class BioPipelineClient:
     
     def __init__(
         self,
-        pipeline_dir: str = "/pipeline",
         datasets_dir: str = "/datasets",
-        output_dir: str = "/output",
-        reference_dir: str = "/reference"
+        reference_dir: str = "/datasets/reference_genome",
+        bam_dir: str = "/datasets/bam",
+        vcf_dir: str = "/datasets/vcf",
+        annotation_dir: str = "/datasets/annotations"
     ):
         """Initialize pipeline client"""
-        self.pipeline_dir = pipeline_dir
         self.datasets_dir = datasets_dir
-        self.output_dir = output_dir
         self.reference_dir = reference_dir
+        self.bam_dir = bam_dir
+        self.vcf_dir = vcf_dir
+        self.annotation_dir = annotation_dir
         
         # Environment variables
-        self.reference_genome = os.getenv("REFERENCE_GENOME", "/reference/hg38")
+        self.reference_genome = os.getenv("REFERENCE_GENOME", f"{reference_dir}/Homo_sapiens.GRCh38.dna_sm.toplevel.fa")
+        self.fastq_dir = os.getenv("FASTQ_DIR", f"{datasets_dir}/fastq")
     
     def run_pipeline(
         self,
@@ -68,13 +71,16 @@ class BioPipelineClient:
         # Build environment
         env = os.environ.copy()
         env["REFERENCE_GENOME"] = reference
-        env["INPUT_DIR"] = self.datasets_dir
-        env["OUTPUT_DIR"] = self.output_dir
+        env["INPUT_DIR"] = self.fastq_dir
+        env["OUTPUT_DIR"] = self.bam_dir
+        env["VCF_OUTPUT_DIR"] = self.vcf_dir
+        env["ANNOTATION_DIR"] = self.annotation_dir
         
-        pipeline_script = f"{self.pipeline_dir}/scripts/pipeline.sh"
+        pipeline_script = "/pipeline/scripts/pipeline.sh"
         
         logger.info(f"Starting pipeline for sample: {sample_id}")
         logger.info(f"Input file: {input_file}")
+        logger.info(f"Reference genome: {reference}")
         
         try:
             # Run pipeline script
@@ -89,12 +95,14 @@ class BioPipelineClient:
             if result.returncode == 0:
                 logger.info(f"Pipeline completed successfully for {sample_id}")
                 
-                # Find output VCF file
+                # Find output files
+                bam_file = self._find_file(self.bam_dir, f"{sample_id}_sorted.bam")
                 vcf_file = self._find_vcf_file(sample_id)
                 
                 return {
                     "success": True,
                     "sample_id": sample_id,
+                    "bam_file": bam_file,
                     "vcf_file": vcf_file,
                     "output": result.stdout,
                     "timestamp": datetime.utcnow().isoformat()
@@ -125,26 +133,30 @@ class BioPipelineClient:
                 "timestamp": datetime.utcnow().isoformat()
             }
     
-    def _find_vcf_file(self, sample_id: str) -> Optional[str]:
-        """Find generated VCF file for sample"""
-        output_path = Path(self.output_dir)
-        
-        if not output_path.exists():
+    def _find_file(self, directory: str, filename: str) -> Optional[str]:
+        """Find a file in directory"""
+        path = Path(directory)
+        if not path.exists():
             return None
         
-        # Look for filtered VCF file
-        vcf_files = list(output_path.glob(f"{sample_id}*_filtered.vcf"))
+        files = list(path.glob(filename))
+        return str(files[0]) if files else None
+    
+    def _find_vcf_file(self, sample_id: str) -> Optional[str]:
+        """Find generated VCF file for sample"""
+        # Check for annotated VCF first
+        vcf_file = self._find_file(self.vcf_dir, f"{sample_id}_annotated.vcf")
+        if vcf_file:
+            return vcf_file
         
-        if vcf_files:
-            return str(vcf_files[0])
+        # Check for filtered VCF
+        vcf_file = self._find_file(self.vcf_dir, f"{sample_id}_filtered.vcf")
+        if vcf_file:
+            return vcf_file
         
-        # Look for any VCF file
-        vcf_files = list(output_path.glob(f"{sample_id}*.vcf"))
-        
-        if vcf_files:
-            return str(vcf_files[0])
-        
-        return None
+        # Check for any VCF file
+        vcf_file = self._find_file(self.vcf_dir, f"{sample_id}*.vcf")
+        return vcf_file
     
     def parse_vcf(self, vcf_file: str) -> List[Dict[str, Any]]:
         """
@@ -197,17 +209,17 @@ class BioPipelineClient:
     
     def get_available_samples(self) -> List[str]:
         """Get list of available sample files"""
-        datasets_path = Path(self.datasets_dir)
+        fastq_path = Path(self.fastq_dir)
         
-        if not datasets_path.exists():
+        if not fastq_path.exists():
             return []
         
         samples = []
-        for file in datasets_path.glob("*.fastq"):
+        for file in fastq_path.glob("*.fastq"):
             samples.append(file.stem)
-        for file in datasets_path.glob("*.fq"):
+        for file in fastq_path.glob("*.fq"):
             samples.append(file.stem)
-        for file in datasets_path.glob("*.fastq.gz"):
+        for file in fastq_path.glob("*.fastq.gz"):
             samples.append(file.stem.replace('.fastq.gz', ''))
         
         return sorted(set(samples))
@@ -215,23 +227,25 @@ class BioPipelineClient:
     def get_pipeline_status(self) -> Dict[str, Any]:
         """Get pipeline status and available files"""
         return {
-            "pipeline_dir": self.pipeline_dir,
             "datasets_dir": self.datasets_dir,
-            "output_dir": self.output_dir,
             "reference_dir": self.reference_dir,
             "reference_genome": self.reference_genome,
+            "fastq_dir": self.fastq_dir,
+            "bam_dir": self.bam_dir,
+            "vcf_dir": self.vcf_dir,
+            "annotation_dir": self.annotation_dir,
+            "reference_exists": Path(self.reference_genome).exists(),
             "available_samples": self.get_available_samples(),
-            "output_files": self._list_output_files()
+            "bam_files": self._list_files(self.bam_dir, "*.bam"),
+            "vcf_files": self._list_files(self.vcf_dir, "*.vcf")
         }
     
-    def _list_output_files(self) -> List[str]:
-        """List output files"""
-        output_path = Path(self.output_dir)
-        
-        if not output_path.exists():
+    def _list_files(self, directory: str, pattern: str) -> List[str]:
+        """List files in directory matching pattern"""
+        path = Path(directory)
+        if not path.exists():
             return []
-        
-        return [str(f) for f in output_path.iterdir()]
+        return [str(f) for f in path.glob(pattern)]
 
 
 # Singleton instance

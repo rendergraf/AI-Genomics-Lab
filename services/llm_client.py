@@ -39,6 +39,17 @@ class LLMClient:
         self.default_model = "anthropic/claude-3-sonnet"
         self.max_retries = 3
         self.timeout = 60.0
+        
+        # Initialize cache
+        try:
+            from services.cache_service import get_cache_service
+            self.cache = get_cache_service()
+            self.use_cache = True
+            logger.info("LLM cache enabled")
+        except Exception as e:
+            self.cache = None
+            self.use_cache = False
+            logger.warning(f"LLM cache disabled: {e}")
     
     def _build_headers(self) -> Dict[str, str]:
         """Build HTTP headers for API requests"""
@@ -55,7 +66,8 @@ class LLMClient:
         system_message: Optional[str] = None,
         model: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 2000
+        max_tokens: int = 2000,
+        use_cache: bool = True
     ) -> Dict[str, Any]:
         """
         Generate response from LLM
@@ -66,11 +78,18 @@ class LLMClient:
             model: Model to use (default: claude-3-sonnet)
             temperature: Sampling temperature (0-2)
             max_tokens: Maximum tokens to generate
+            use_cache: Whether to use cache (default: True)
             
         Returns:
             Dict with response and metadata
         """
         model = model or self.default_model
+        
+        # Check cache first
+        if use_cache and self.use_cache and self.cache:
+            cached = self.cache.get(prompt, model, temperature)
+            if cached:
+                return cached
         
         messages = []
         if system_message:
@@ -96,13 +115,19 @@ class LLMClient:
                     
                     data = response.json()
                     
-                    return {
+                    result = {
                         "success": True,
                         "content": data["choices"][0]["message"]["content"],
                         "model": model,
                         "usage": data.get("usage", {}),
                         "timestamp": datetime.utcnow().isoformat()
                     }
+                    
+                    # Cache the response
+                    if use_cache and self.use_cache and self.cache:
+                        self.cache.set(prompt, result, model, temperature)
+                    
+                    return result
                     
                 except httpx.HTTPStatusError as e:
                     logger.error(f"HTTP error on attempt {attempt + 1}: {e}")

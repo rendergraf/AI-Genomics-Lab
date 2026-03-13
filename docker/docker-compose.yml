@@ -5,7 +5,9 @@ services:
   # API Service (FastAPI)
   # =======================
   api:
-    image: tiangolo/uvicorn-gunicorn-fastapi:python3.11
+    build:
+      context: ..
+      dockerfile: api/Dockerfile
     container_name: ai-genomics-api
     ports:
       - "8000:80"
@@ -18,8 +20,6 @@ services:
       - MINIO_ACCESS_KEY=genomics
       - MINIO_SECRET_KEY=genomics
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-    volumes:
-      - ../api:/app
     depends_on:
       - postgres
       - neo4j

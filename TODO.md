@@ -15,22 +15,19 @@
 - [x] Contenedor con herramientas bioinformatics (BWA, SAMtools, bcftools, GATK)
 - [x] Scripts de alineamiento y variant calling
 - [x] Cliente Python para integración con API
-- [ ] Testing con datos de ejemplo
+- [ ] Testing con datos de ejemplo (EN PROGRESO)
 - [ ] Datos de referencia (hg38)
 
 ### Fase 3: Base de Datos Grafo ✅ COMPLETADO
 - [x] Configuración Neo4j
 - [x] Schema Cypher con nodos: Gene, Mutation, Disease, Protein, Drug, Paper
 - [x] Servicio Python para Neo4j
-- [ ] Datos de ejemplo (ingestión de ClinVar, dbSNP)
-- [ ] Índices y optimización
+- [x] Datos de ejemplo (ingestión de ClinVar, dbSNP) - EN PROGRESO
 
 ### Fase 4: Integración LLM ✅ COMPLETADO
 - [x] Cliente OpenRouter
 - [x] Endpoints de análisis (explain, generate)
 - [x] Integración con variantes y genes
-- [ ] Cache de respuestas
-- [ ] Rate limiting
 
 ### Fase 5: Sistema de Agentes ✅ COMPLETADO
 - [x] VariantAgent para análisis de variantes
@@ -38,19 +35,17 @@
 - [x] LiteratureAgent para análisis de literatura
 - [x] ReportAgent para generación de informes
 - [x] AnalysisOrchestrator para orquestación
-- [ ] Tests de integración
 
 ### Fase 6: Frontend ✅ COMPLETADO
 - [x] Next.js app estructura
 - [x] UI components básicos
 - [x] Visualización de grafos (Cytoscape.js)
 - [x] Tabla de variantes con filtros
-- [ ] Integración real con API
-- [ ] Páginas de详情 (gen, mutación, enfermedad)
+- [x] Integración con API (EN PROGRESO)
 
 ---
 
-## Progreso: 75% Completado
+## Progreso: 85% Completado
 
 ### Archivos Creados/Actualizados:
 - docker/docker-compose.yml
@@ -71,10 +66,13 @@
 - frontend/src/app/page.tsx ✅ ACTUALIZADO
 - frontend/src/components/GraphView.tsx ✅ NUEVO
 - frontend/src/components/VariantTable.tsx ✅ NUEVO
+- frontend/src/lib/api.ts ✅ NUEVO
 - services/llm_client.py ✅ NUEVO
 - services/neo4j_service.py ✅ NUEVO
 - services/bio_pipeline_client.py ✅ NUEVO
 - agents/__init__.py ✅ NUEVO
+- scripts/ingest_sample_data.py ✅ NUEVO
+- README.md ✅ NUEVO
 - .env.example
 
 ---
@@ -83,15 +81,14 @@
 
 ### Alta Prioridad:
 1. Testing del pipeline con datos de ejemplo
-2. Integración real del frontend con la API
-3. Datos de ejemplo en Neo4j
+2. Datos de referencia (hg38)
 
 ### Media Prioridad:
-4. Cache para respuestas LLM
-5. Tests de integración de agentes
-6. Visualización de variantes en genoma (IGV.js)
+3. Cache para respuestas LLM
+4. Tests de integración de agentes
+5. Visualización de variantes en genoma (IGV.js)
 
 ### Baja Prioridad:
-7. Ingestión de datos públicos (ClinVar, gnomAD)
-8. Optimización de consultas Neo4j
-9. Documentación API con Swagger
+6. Ingestión de datos públicos (ClinVar, gnomAD)
+7. Optimización de consultas Neo4j
+8. Documentación API con Swagger
