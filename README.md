@@ -1,4 +1,5 @@
 # 🧬 AI Genomics Lab
+AI-powered bioinformatics research platform for genomic analysis and disease detection.
 
 <p align="center">
   <a href="https://github.com/rendergraf/AI-Genomics-Lab"><img src="https://img.shields.io/github/stars/rendergraf/AI-Genomics-Lab" alt="GitHub Stars"></a>
@@ -6,7 +7,7 @@
   <a href="https://github.com/rendergraf/AI-Genomics-Lab/blob/main/LICENSE"><img src="https://img.shields.io/github/license/rendergraf/AI-Genomics-Lab" alt="MIT license"></a>
 </p>
 
-## 🧬 Tech Stack
+## Tech Stack
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&style=flat" alt="Python">
@@ -30,9 +31,6 @@
   <img src="https://img.shields.io/badge/MinIO-Storage-orange" alt="MinIO">
 </p>
 
-
-
-AI-powered bioinformatics research platform for genomic analysis and disease detection.
 
 ## 📋 Description
 
