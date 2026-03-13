@@ -1,15 +1,36 @@
----
-project: AI Genomics Lab
-author: Xavier Araque
-email: xavieraraque@gmail.com
-github: https://github.com/rendergraf/AI-Genomics-Lab
-version: 0.1
-country: Spain
-date: March 2026
-license: MIT
----
-
 # 🧬 AI Genomics Lab
+
+<p align="center">
+  <a href="https://github.com/rendergraf/AI-Genomics-Lab"><img src="https://img.shields.io/github/stars/rendergraf/AI-Genomics-Lab" alt="GitHub Stars"></a>
+  <a href="https://github.com/rendergraf/AI-Genomics-Lab"><img src="https://img.shields.io/github/forks/rendergraf/AI-Genomics-Lab" alt="GitHub Forks"></a>
+  <a href="https://github.com/rendergraf/AI-Genomics-Lab/blob/main/LICENSE"><img src="https://img.shields.io/github/license/rendergraf/AI-Genomics-Lab" alt="MIT license"></a>
+</p>
+
+## 🧬 Tech Stack
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&style=flat" alt="Python">
+  <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&style=flat" alt="FastAPI">
+  <img src="https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&style=flat" alt="Next.js">
+  <img src="https://img.shields.io/badge/React-61DAFB?logo=react&style=flat" alt="React">
+  <img src="https://img.shields.io/badge/Neo4j-0181FF?logo=neo4j&style=flat" alt="Neo4j">
+  <img src="https://img.shields.io/badge/PostgreSQL-336791?logo=postgresql&style=flat" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/Docker-2496ED?logo=docker&style=flat" alt="Docker">
+  <img src="https://img.shields.io/badge/Tailwind_CSS-38B2AC?logo=tailwindcss&style=flat" alt="Tailwind CSS">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/LangGraph-AI/LLM-blue" alt="LangGraph">
+  <img src="https://img.shields.io/badge/OpenRouter-LLM-orange" alt="OpenRouter">
+  <img src="https://img.shields.io/badge/Cytoscape.js-FF6F00?logo=cytoscape&style=flat" alt="Cytoscape.js">
+  <img src="https://img.shields.io/badge/IGV.js-Genome%20Browser-green" alt="IGV.js">
+  <img src="https://img.shields.io/badge/BWA-Bioinformatics-blue" alt="BWA">
+  <img src="https://img.shields.io/badge/SAMtools-Bioinformatics-red" alt="SAMtools">
+  <img src="https://img.shields.io/badge/bcftools-Bioinformatics-green" alt="bcftools">
+  <img src="https://img.shields.io/badge/MinIO-Storage-orange" alt="MinIO">
+</p>
+
+
 
 AI-powered bioinformatics research platform for genomic analysis and disease detection.
 
