@@ -265,7 +265,10 @@ class Neo4jService:
         return len(results) > 0
     
     async def get_statistics(self) -> Dict[str, Any]:
-        """Get database statistics"""
+        """Get database statistics - Optimized with parallel queries"""
+        import asyncio
+        
+        # Define all count queries
         queries = {
             "genes": "MATCH (g:Gene) RETURN count(g) as count",
             "mutations": "MATCH (m:Mutation) RETURN count(m) as count",
@@ -275,15 +278,19 @@ class Neo4jService:
             "drugs": "MATCH (dr:Drug) RETURN count(dr) as count"
         }
         
-        stats = {}
-        for key, query in queries.items():
+        # Execute all queries in parallel for better performance
+        async def get_count(query: str) -> tuple:
             result = await self.execute_query(query)
-            stats[key] = result[0].get("count", 0) if result else 0
+            key = [k for k, v in queries.items() if v == query][0]
+            return key, result[0].get("count", 0) if result else 0
         
-        return stats
+        # Run all queries concurrently
+        results = await asyncio.gather(*[get_count(q) for q in queries.values()])
+        
+        return dict(results)
     
     async def initialize_schema(self) -> None:
-        """Initialize database constraints and indexes"""
+        """Initialize database constraints and indexes for performance"""
         constraints = [
             "CREATE CONSTRAINT gene_id IF NOT EXISTS FOR (g:Gene) REQUIRE g.id IS UNIQUE",
             "CREATE CONSTRAINT mutation_id IF NOT EXISTS FOR (m:Mutation) REQUIRE m.id IS UNIQUE",
@@ -293,12 +300,29 @@ class Neo4jService:
             "CREATE CONSTRAINT paper_id IF NOT EXISTS FOR (pa:Paper) REQUIRE pa.id IS UNIQUE"
         ]
         
+        # Indexes for frequently queried properties
+        indexes = [
+            "CREATE INDEX gene_chromosome IF NOT EXISTS FOR (g:Gene) ON (g.chromosome)",
+            "CREATE INDEX mutation_pathogenicity IF NOT EXISTS FOR (m:Mutation) ON (m.pathogenicity)",
+            "CREATE INDEX mutation_position IF NOT EXISTS FOR (m:Mutation) ON (m.position)",
+            "CREATE INDEX gene_name IF NOT EXISTS FOR (g:Gene) ON (g.name)",
+            "CREATE INDEX disease_category IF NOT EXISTS FOR (d:Disease) ON (d.category)"
+        ]
+        
         for constraint in constraints:
             try:
                 await self.execute_query(constraint)
                 logger.info(f"Created constraint: {constraint[:50]}...")
             except Exception as e:
                 logger.debug(f"Constraint may already exist: {e}")
+        
+        # Create indexes for performance
+        for index in indexes:
+            try:
+                await self.execute_query(index)
+                logger.info(f"Created index: {index[:50]}...")
+            except Exception as e:
+                logger.debug(f"Index may already exist: {e}")
         
         logger.info("Neo4j schema initialized")
 

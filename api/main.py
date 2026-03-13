@@ -101,7 +101,11 @@ app.add_middleware(
 )
 
 
-@app.get("/")
+@app.get("/", tags=["Health"], summary="Root endpoint", description="""
+    API Root - Welcome message
+    
+    Returns basic information about the API including version, status, and available services.
+    """)
 async def root():
     """Root endpoint"""
     return {
@@ -117,7 +121,18 @@ async def root():
     }
 
 
-@app.get("/health")
+@app.get("/health", tags=["Health"], summary="Health check", description="""
+    Health Check - Verify all services are running
+    
+    Returns the status of all system components:
+    - API: Main application status
+    - Database: PostgreSQL connection
+    - Graph: Neo4j connection
+    - Storage: MinIO connection
+    
+    Returns:
+        Dictionary with status of all services
+    """)
 async def health_check():
     """Health check endpoint"""
     return {
@@ -133,7 +148,24 @@ async def health_check():
 # Analysis Endpoints
 # =======================
 
-@app.post("/analysis/upload")
+@app.post("/analysis/upload", tags=["Analysis"], summary="Upload genome file", description="""
+    Upload Genome File
+    
+    Upload a genome file (FASTQ, FASTA, or BAM) for analysis.
+    
+    Supported formats:
+    - FASTQ (.fastq, .fq) - Raw sequencing reads
+    - FASTA (.fasta, .fa) - Reference sequences
+    - BAM (.bam) - Aligned reads
+    
+    The file will be stored in the datasets directory and queued for processing.
+    
+    Args:
+        file: Genome file to upload
+        
+    Returns:
+        Upload confirmation with file path
+    """)
 async def upload_genome_file(file: UploadFile = File(...)):
     """
     Upload genome file (FASTQ, FASTA, BAM)
@@ -157,7 +189,24 @@ async def upload_genome_file(file: UploadFile = File(...)):
     }
 
 
-@app.post("/analysis/run")
+@app.post("/analysis/run", tags=["Analysis"], summary="Run analysis pipeline", description="""
+    Run Complete Analysis Pipeline
+    
+    Execute the bioinformatics pipeline on an uploaded sample.
+    
+    Pipeline steps:
+    1. Quality control of input reads
+    2. Alignment to reference genome (BWA-MEM)
+    3. Sorting and indexing (SAMtools)
+    4. Variant calling (bcftools)
+    5. Variant filtering and annotation
+    
+    Args:
+        sample_id: Unique identifier for the sample
+        
+    Returns:
+        Analysis results including detected variants in VCF format
+    """)
 async def run_analysis(sample_id: str):
     """
     Run complete analysis pipeline for a sample
@@ -200,7 +249,15 @@ async def run_analysis(sample_id: str):
         }
 
 
-@app.get("/analysis/status")
+@app.get("/analysis/status", tags=["Analysis"], summary="Get pipeline status", description="""
+    Get Pipeline Status
+    
+    Returns current status of the bioinformatics pipeline including:
+    - Available input files
+    - Generated output files (BAM, VCF)
+    - Reference genome status
+    - Processing queue
+    """)
 async def get_pipeline_status():
     """Get pipeline status and available files"""
     pipeline_client = get_bio_pipeline_client()
@@ -211,7 +268,22 @@ async def get_pipeline_status():
 # Knowledge Graph Endpoints
 # =======================
 
-@app.get("/graph/genes/{gene_symbol}")
+@app.get("/graph/genes/{gene_symbol}", tags=["Graph"], summary="Get gene information", description="""
+    Get Gene Information
+    
+    Retrieve detailed information about a specific gene from the knowledge graph.
+    
+    Args:
+        gene_symbol: Gene symbol (e.g., BRCA1, TP53, EGFR)
+        
+    Returns:
+        Gene details including:
+        - Chromosome location
+        - Start/end positions
+        - Description
+        - Associated mutations
+        - Disease associations
+    """)
 async def get_gene_info(gene_symbol: str):
     """
     Get gene information from knowledge graph
@@ -225,7 +297,22 @@ async def get_gene_info(gene_symbol: str):
     return result
 
 
-@app.get("/graph/mutations/{mutation_id}")
+@app.get("/graph/mutations/{mutation_id}", tags=["Graph"], summary="Get mutation information", description="""
+    Get Mutation Information
+    
+    Retrieve detailed information about a specific mutation from the knowledge graph.
+    
+    Args:
+        mutation_id: Mutation identifier (e.g., c.68_69delAG, R273H)
+        
+    Returns:
+        Mutation details including:
+        - Gene association
+        - Position
+        - Ref/Alt alleles
+        - Pathogenicity classification
+        - Disease associations
+    """)
 async def get_mutation_info(mutation_id: str):
     """
     Get mutation information from knowledge graph
@@ -239,7 +326,21 @@ async def get_mutation_info(mutation_id: str):
     return result
 
 
-@app.get("/graph/diseases/{disease_id}")
+@app.get("/graph/diseases/{disease_id}", tags=["Graph"], summary="Get disease information", description="""
+    Get Disease Information
+    
+    Retrieve detailed information about a specific disease from the knowledge graph.
+    
+    Args:
+        disease_id: Disease identifier (e.g., OMIM:604370)
+        
+    Returns:
+        Disease details including:
+        - Name and description
+        - Category
+        - Inheritance pattern
+        - Associated genes and mutations
+    """)
 async def get_disease_info(disease_id: str):
     """
     Get disease information from knowledge graph
@@ -253,7 +354,17 @@ async def get_disease_info(disease_id: str):
     return result
 
 
-@app.get("/graph/search")
+@app.get("/graph/search", tags=["Graph"], summary="Search genes and mutations", description="""
+    Search Knowledge Graph
+    
+    Search for genes, mutations, or diseases in the knowledge graph.
+    
+    Args:
+        q: Search query (gene symbol, mutation ID, disease name)
+        
+    Returns:
+        Search results with matching entities
+    """)
 async def search_genes(q: str):
     """Search genes in knowledge graph"""
     graph_agent = get_graph_agent()
@@ -261,7 +372,17 @@ async def search_genes(q: str):
     return result
 
 
-@app.get("/graph/statistics")
+@app.get("/graph/statistics", tags=["Graph"], summary="Get graph statistics", description="""
+    Get Knowledge Graph Statistics
+    
+    Returns statistics about the knowledge graph including:
+    - Total number of genes
+    - Total number of mutations
+    - Total number of diseases
+    - Total number of proteins
+    - Total number of papers
+    - Total number of drugs
+    """)
 async def get_graph_statistics():
     """Get knowledge graph statistics"""
     neo4j_service = get_neo4j_service()
@@ -272,7 +393,23 @@ async def get_graph_statistics():
 # AI Agent Endpoints
 # =======================
 
-@app.post("/agents/analyze")
+@app.post("/agents/analyze", tags=["Agents"], summary="Analyze variant with AI", description="""
+    Analyze Variant with AI Agent
+    
+    Use the VariantAgent to perform deep analysis of a specific variant.
+    
+    The agent will:
+    1. Query the knowledge graph for gene/mutation context
+    2. Retrieve relevant literature
+    3. Use LLM to generate analysis
+    4. Provide clinical interpretation
+    
+    Args:
+        variant_id: Variant identifier to analyze
+        
+    Returns:
+        Detailed AI-generated analysis of the variant
+    """)
 async def analyze_variant(variant_id: str):
     """
     Run AI agent to analyze a specific variant
@@ -286,7 +423,25 @@ async def analyze_variant(variant_id: str):
     return result
 
 
-@app.post("/agents/report")
+@app.post("/agents/report", tags=["Agents"], summary="Generate scientific report", description="""
+    Generate Scientific Report
+    
+    Use the ReportAgent to generate a comprehensive scientific report.
+    
+    The report includes:
+    1. Executive Summary
+    2. Methodology
+    3. Variant Analysis
+    4. Clinical Interpretation
+    5. Conclusions and Recommendations
+    
+    Args:
+        sample_id: Sample identifier
+        variants: List of detected variants
+        
+    Returns:
+        Generated scientific report
+    """)
 async def generate_report(
     sample_id: str,
     variants: list
@@ -300,7 +455,24 @@ async def generate_report(
     return result
 
 
-@app.post("/agents/complete-analysis")
+@app.post("/agents/complete-analysis", tags=["Agents"], summary="Run complete AI analysis", description="""
+    Run Complete Analysis with All Agents
+    
+    Execute a comprehensive analysis using all AI agents in orchestration.
+    
+    This includes:
+    - VariantAgent for variant analysis
+    - GraphAgent for knowledge graph queries
+    - LiteratureAgent for research retrieval
+    - ReportAgent for summary generation
+    
+    Args:
+        sample_id: Sample identifier
+        variants: List of detected variants
+        
+    Returns:
+        Complete analysis results from all agents
+    """)
 async def run_complete_analysis(
     sample_id: str,
     variants: list
@@ -318,7 +490,24 @@ async def run_complete_analysis(
 # LLM Integration Endpoints
 # =======================
 
-@app.post("/llm/explain")
+@app.post("/llm/explain", tags=["LLM"], summary="Explain mutation with AI", description="""
+    Explain Mutation Using LLM
+    
+    Use the Language Model to explain the biological impact of a mutation.
+    
+    The explanation includes:
+    1. Biological explanation of the mutation
+    2. Impact on protein function
+    3. Disease associations
+    4. Clinical significance
+    
+    Args:
+        mutation: Mutation identifier (e.g., c.68_69delAG)
+        gene: Gene symbol (e.g., BRCA1)
+        
+    Returns:
+        LLM-generated explanation
+    """)
 async def explain_mutation(mutation: str, gene: str):
     """
     Use LLM to explain biological impact of mutation
@@ -329,7 +518,19 @@ async def explain_mutation(mutation: str, gene: str):
     return result
 
 
-@app.post("/llm/generate")
+@app.post("/llm/generate", tags=["LLM"], summary="Generate text with LLM", description="""
+    Generate Text with LLM
+    
+    Use the Language Model for general text generation.
+    
+    Args:
+        prompt: User prompt
+        system_message: Optional system message for context
+        temperature: Sampling temperature (0-2, default 0.7)
+        
+    Returns:
+        LLM-generated response
+    """)
 async def generate_with_llm(
     prompt: str,
     system_message: str = None,
