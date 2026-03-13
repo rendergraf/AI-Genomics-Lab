@@ -36,7 +36,7 @@ class LLMClient:
             logger.warning("OpenRouter API key not found in environment")
         
         self.base_url = "https://openrouter.ai/api/v1"
-        self.default_model = "anthropic/claude-3-sonnet"
+        self.default_model = "google/gemma-2-9b-it"
         self.max_retries = 3
         self.timeout = 60.0
         
