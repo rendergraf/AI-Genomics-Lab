@@ -337,11 +337,61 @@ cd docker
 docker-compose up -d
 ```
 
-4. Access the application:
-   - Frontend: http://localhost:3000
-   - API: http://localhost:8000
-   - Neo4j: http://localhost:7474
-   - API Docs: http://localhost:8000/docs
+4. Wait for services to be ready (about 30 seconds)
+
+5. Verify services are running:
+```bash
+docker ps
+curl http://localhost:8000/health
+```
+
+### Accessing Services
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| **Frontend** | http://localhost:3000 | - |
+| **API Docs (Swagger)** | http://localhost:8000/docs | - |
+| **Neo4j Browser** | http://localhost:7474 | neo4j / genomics |
+| **MinIO Console** | http://localhost:9001 | genomics / genomics |
+| **PostgreSQL** | localhost:5432 | genomics / genomics / genomics |
+
+### Quick Test
+
+```bash
+# Check API health
+curl http://localhost:8000/health
+# Response: {"status":"healthy","api":"ok","database":"ok","graph":"ok","storage":"ok"}
+
+# Check available samples
+curl http://localhost:8000/analysis/status
+```
+
+### Stopping Services
+
+```bash
+cd docker
+docker-compose down
+```
+
+### Pipeline Data
+
+Place your genome files in the appropriate directories:
+
+```bash
+# FASTQ files (input)
+mkdir -p datasets/fastq
+# Place .fastq or .fastq.gz files here
+
+# Reference genome (supports .fa or .fa.gz)
+mkdir -p datasets/reference_genome
+# Place Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz here
+
+# Output directories (auto-created)
+datasets/bam      # Aligned BAM files
+datasets/vcf      # Variant call files
+datasets/logs    # Pipeline logs
+datasets/annotations  # Annotation files (e.g., clinvar.vcf)
+```
 
 ### Development
 
@@ -359,7 +409,68 @@ npm install
 npm run dev
 ```
 
-## 🤖 Agent System
+## 🧬 Bioinformatics Pipeline
+
+### Pipeline Overview
+
+The bioinformatics pipeline processes FASTQ files through the following steps:
+
+```
+FASTQ → BWA-MEM → SAM → BAM → sorted BAM → indexed BAM → bcftools mpileup → VCF → filtered VCF → annotated VCF
+```
+
+### Tools Used
+
+| Tool | Purpose |
+|------|---------|
+| BWA-MEM | Sequence alignment |
+| SAMtools | SAM/BAM processing and indexing |
+| bcftools | Variant calling and filtering |
+| GATK | Genome Analysis Toolkit (optional) |
+
+### Pipeline Features
+
+- **Streaming**: Uses pipes to avoid writing intermediate SAM files (saves disk space)
+- **Parallel processing**: Uses 4 threads for BWA and samtools
+- **Compressed reference**: Supports `.fa.gz` - automatically decompresses on first run
+- **Smart indexing**: Only reindexes if indices don't exist
+- **Detailed logging**: Each step logs to `/datasets/logs/{sample}_{tool}.log`
+
+### Reference Genome
+
+The pipeline supports both compressed and uncompressed reference genomes:
+
+```bash
+# Place in datasets/reference_genome/
+Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz  # Recommended (3GB vs 60GB)
+# or
+Homo_sapiens.GRCh38.dna_sm.toplevel.fa
+```
+
+On first run, the compressed file will be decompressed automatically.
+
+### Running Pipeline
+
+```bash
+# Via API
+curl -X POST http://localhost:8000/analysis/run -H "Content-Type: application/json" \
+  -d '{"sample_id": "sample_001"}'
+
+# Check status
+curl http://localhost:8000/analysis/status
+```
+
+### Pipeline Environment Variables
+
+```env
+REFERENCE_GENOME_GZ=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz
+REFERENCE_GENOME=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa
+INPUT_DIR=/datasets/fastq
+OUTPUT_DIR=/datasets/bam
+VCF_OUTPUT_DIR=/datasets/vcf
+LOGS_DIR=/datasets/logs
+ANNOTATION_DIR=/datasets/annotations
+```
 
 ### VariantAgent
 Analyzes specific variants by querying the knowledge graph and generating clinical interpretations.
@@ -401,6 +512,23 @@ response = requests.post(
 print(response.json())
 ```
 
+## 🤖 Agent System
+
+### VariantAgent
+Analyzes specific variants by querying the knowledge graph and generating clinical interpretations.
+
+### GraphAgent
+Performs queries to Neo4j to retrieve information about genes, mutations, and diseases.
+
+### LiteratureAgent
+Retrieves and analyzes relevant scientific literature for detected variants.
+
+### ReportAgent
+Generates complete scientific reports including executive summary, methodology, variant analysis, and clinical interpretation.
+
+### AnalysisOrchestrator
+Orchestrator that coordinates all agents for complete analysis.
+
 ## 📝 Environment Variables Configuration
 
 ```env
@@ -419,6 +547,10 @@ MINIO_SECRET_KEY=genomics
 
 # LLM
 OPENROUTER_API_KEY=your_api_key_here
+
+# Pipeline (optional)
+REFERENCE_GENOME=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa
+REFERENCE_GENOME_GZ=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz
 ```
 
 ## 🔒 Security

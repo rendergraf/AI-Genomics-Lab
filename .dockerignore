@@ -1,0 +1,47 @@
+# Large data directories
+datasets
+venv
+env
+.venv
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Logs
+logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Testing
+.coverage
+htmlcov
+.pytest_cache
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker/node_modules
+
+# Misc
+*.tmp
+*.temp

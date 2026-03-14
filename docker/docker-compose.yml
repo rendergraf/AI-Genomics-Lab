@@ -10,7 +10,11 @@ services:
       dockerfile: api/Dockerfile
     container_name: ai-genomics-api
     ports:
-      - "8000:80"
+      - "8000:8000"
+    volumes:
+      - ../bio-pipeline:/pipeline
+      - ../datasets:/datasets
+      - datasets-logs:/datasets/logs
     environment:
       - DATABASE_URL=postgresql://genomics:genomics@postgres:5432/genomics
       - NEO4J_URI=bolt://neo4j:7687
@@ -20,6 +24,8 @@ services:
       - MINIO_ACCESS_KEY=genomics
       - MINIO_SECRET_KEY=genomics
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - REFERENCE_GENOME_GZ=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz
+      - REFERENCE_GENOME=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa
     depends_on:
       - postgres
       - neo4j
@@ -85,13 +91,26 @@ services:
   # Bioinformatics Pipeline
   # =======================
   bio-pipeline:
-    image: ubuntu:22.04
+    build:
+      context: ../bio-pipeline
+      dockerfile: Dockerfile
     container_name: ai-genomics-bio
-    command: tail -f /dev/null
     volumes:
       - ../bio-pipeline:/pipeline
       - ../datasets:/datasets
+      - datasets-logs:/datasets/logs
+      - datasets-bam:/datasets/bam
+      - datasets-vcf:/datasets/vcf
+      - datasets-annotations:/datasets/annotations
       - reference-data:/reference
+    environment:
+      - REFERENCE_GENOME_GZ=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz
+      - REFERENCE_GENOME=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa
+      - INPUT_DIR=/datasets/fastq
+      - OUTPUT_DIR=/datasets/bam
+      - VCF_OUTPUT_DIR=/datasets/vcf
+      - ANNOTATION_DIR=/datasets/annotations
+      - LOGS_DIR=/datasets/logs
     networks:
       - genomics-network
 
@@ -99,14 +118,15 @@ services:
   # Frontend (Next.js)
   # =======================
   frontend:
-    image: node:20-alpine
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
     container_name: ai-genomics-frontend
-    working_dir: /app
-    command: tail -f /dev/null
     ports:
       - "3000:3000"
-    volumes:
-      - ../frontend:/app
+    environment:
+      - NODE_ENV=production
+      - API_URL=http://api:8000
     depends_on:
       - api
     networks:
@@ -128,3 +148,7 @@ volumes:
   postgres-data:
   minio-data:
   reference-data:
+  datasets-logs:
+  datasets-bam:
+  datasets-vcf:
+  datasets-annotations:

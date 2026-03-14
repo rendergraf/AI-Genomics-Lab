@@ -10,7 +10,7 @@ License: MIT
 """
 
 import os
-import json
+import re
 import logging
 import subprocess
 from typing import Optional, List, Dict, Any
@@ -45,8 +45,15 @@ class BioPipelineClient:
         self.vcf_dir = vcf_dir
         self.annotation_dir = annotation_dir
         
-        # Environment variables
-        self.reference_genome = os.getenv("REFERENCE_GENOME", f"{reference_dir}/Homo_sapiens.GRCh38.dna_sm.toplevel.fa")
+        # Environment variables - support both compressed and uncompressed
+        self.reference_genome_gz = os.getenv(
+            "REFERENCE_GENOME_GZ", 
+            f"{reference_dir}/Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz"
+        )
+        self.reference_genome = os.getenv(
+            "REFERENCE_GENOME", 
+            f"{reference_dir}/Homo_sapiens.GRCh38.dna_sm.toplevel.fa"
+        )
         self.fastq_dir = os.getenv("FASTQ_DIR", f"{datasets_dir}/fastq")
     
     def run_pipeline(
@@ -68,6 +75,26 @@ class BioPipelineClient:
         """
         reference = reference or self.reference_genome
         
+        # Check if compressed genome exists and decompress if needed
+        # Only decompress if the BWA index doesn't exist (the real requirement)
+        genome_gz_path = Path(self.reference_genome_gz)
+        genome_path = Path(self.reference_genome)
+        # Use string concatenation to avoid .with_suffix issues with .fasta files
+        bwa_index_path = Path(str(genome_path) + ".bwt")
+        
+        if genome_gz_path.exists() and not bwa_index_path.exists():
+            if not genome_path.exists():
+                logger.info(f"Decompressing reference genome: {genome_gz_path}")
+                import gzip
+                import shutil
+                # Use streaming to avoid loading entire genome into RAM
+                with gzip.open(genome_gz_path, 'rb') as f_in:
+                    with open(genome_path, 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                logger.info("Reference genome decompressed successfully")
+            else:
+                logger.info("Reference genome exists but BWA index missing - will be indexed")
+        
         # Build environment
         env = os.environ.copy()
         env["REFERENCE_GENOME"] = reference
@@ -78,19 +105,62 @@ class BioPipelineClient:
         
         pipeline_script = "/pipeline/scripts/pipeline.sh"
         
+        # Validate pipeline script exists
+        if not Path(pipeline_script).exists():
+            # Try to find the script in alternative locations
+            alternative_paths = [
+                "/pipeline/scripts/pipeline.sh",
+                "/app/pipeline/scripts/pipeline.sh",
+                "./bio-pipeline/scripts/pipeline.sh",
+                "../bio-pipeline/scripts/pipeline.sh",
+            ]
+            found = False
+            for alt_path in alternative_paths:
+                if Path(alt_path).exists():
+                    pipeline_script = alt_path
+                    found = True
+                    break
+            if not found:
+                logger.error(f"Pipeline script not found in any location")
+                return {
+                    "success": False,
+                    "sample_id": sample_id,
+                    "error": f"Pipeline script not found. Searched in: {alternative_paths}",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+        
         logger.info(f"Starting pipeline for sample: {sample_id}")
         logger.info(f"Input file: {input_file}")
         logger.info(f"Reference genome: {reference}")
         
         try:
-            # Run pipeline script
-            result = subprocess.run(
-                ["/bin/bash", pipeline_script],
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=3600  # 1 hour timeout
-            )
+            # Run pipeline script - log to file to avoid RAM issues with large outputs
+            # Use /datasets/logs instead of /tmp for persistence
+            logs_dir = "/datasets/logs"
+            os.makedirs(logs_dir, exist_ok=True)
+            log_file = f"{logs_dir}/pipeline_{sample_id}.log"
+            with open(log_file, 'w') as log_f:
+                result = subprocess.run(
+                    ["/bin/bash", pipeline_script],
+                    env=env,
+                    stdout=log_f,
+                    stderr=log_f,  # Also redirect stderr to log file
+                    timeout=43200  # 12 hours timeout for whole genome sequencing
+                )
+            
+            # Read last 5000 chars of log to avoid loading huge files into memory
+            with open(log_file, 'r') as log_f:
+                log_f.seek(0, 2)  # Seek to end
+                file_size = log_f.tell()
+                if file_size > 5000:
+                    log_f.seek(-5000, 2)  # Seek to 5000 chars before end
+                output = log_f.read()
+            
+            # Clean up temporary log file
+            try:
+                os.remove(log_file)
+            except OSError:
+                pass
             
             if result.returncode == 0:
                 logger.info(f"Pipeline completed successfully for {sample_id}")
@@ -104,15 +174,17 @@ class BioPipelineClient:
                     "sample_id": sample_id,
                     "bam_file": bam_file,
                     "vcf_file": vcf_file,
-                    "output": result.stdout,
+                    "output": output,
                     "timestamp": datetime.utcnow().isoformat()
                 }
             else:
-                logger.error(f"Pipeline failed: {result.stderr}")
+                # Read error from log file since stderr was redirected
+                error_msg = "Pipeline failed - check log for details"
+                logger.error(f"Pipeline failed for {sample_id}")
                 return {
                     "success": False,
                     "sample_id": sample_id,
-                    "error": result.stderr,
+                    "error": error_msg,
                     "timestamp": datetime.utcnow().isoformat()
                 }
                 
@@ -121,7 +193,7 @@ class BioPipelineClient:
             return {
                 "success": False,
                 "sample_id": sample_id,
-                "error": "Pipeline execution timeout",
+                "error": "Pipeline execution timeout (12 hours)",
                 "timestamp": datetime.utcnow().isoformat()
             }
         except Exception as e:
@@ -171,7 +243,14 @@ class BioPipelineClient:
         variants = []
         
         try:
-            with open(vcf_file, 'r') as f:
+            # Support both .vcf and .vcf.gz files
+            import gzip
+            if vcf_file.endswith('.gz'):
+                opener = gzip.open
+            else:
+                opener = open
+                
+            with opener(vcf_file, 'rt') as f:
                 for line in f:
                     # Skip header lines
                     if line.startswith('#'):
@@ -214,27 +293,61 @@ class BioPipelineClient:
         if not fastq_path.exists():
             return []
         
-        samples = []
-        for file in fastq_path.glob("*.fastq"):
-            samples.append(file.stem)
-        for file in fastq_path.glob("*.fq"):
-            samples.append(file.stem)
-        for file in fastq_path.glob("*.fastq.gz"):
-            samples.append(file.stem.replace('.fastq.gz', ''))
+        samples = set()
         
-        return sorted(set(samples))
+        # Helper function to normalize sample names
+        def normalize_sample(name: str) -> str:
+            # Remove _1/_2 suffix for paired-end using regex
+            # Only matches at end of string to avoid sample_10 issues
+            return re.sub(r'_1$', '', re.sub(r'_2$', '', name))
+        
+        # Handle .fastq files
+        for file in fastq_path.glob("*.fastq"):
+            sample_name = normalize_sample(file.stem)
+            samples.add(sample_name)
+        
+        # Handle .fq files
+        for file in fastq_path.glob("*.fq"):
+            sample_name = normalize_sample(file.stem)
+            samples.add(sample_name)
+        
+        # Handle .fastq.gz files
+        for file in fastq_path.glob("*.fastq.gz"):
+            name = file.name.replace('.fastq.gz', '')
+            sample_name = normalize_sample(name)
+            samples.add(sample_name)
+        
+        # Handle .fq.gz files
+        for file in fastq_path.glob("*.fq.gz"):
+            name = file.name.replace('.fq.gz', '')
+            sample_name = normalize_sample(name)
+            samples.add(sample_name)
+        
+        return sorted(samples)
+    
+    def _check_bwa_index_complete(self, genome_path: Path) -> bool:
+        """Check if all BWA index files exist"""
+        required_indices = [".bwt", ".ann", ".amb", ".pac", ".sa"]
+        base_path = str(genome_path)
+        return all(Path(base_path + ext).exists() for ext in required_indices)
     
     def get_pipeline_status(self) -> Dict[str, Any]:
         """Get pipeline status and available files"""
+        genome_path = Path(self.reference_genome)
+        bwa_index_complete = self._check_bwa_index_complete(genome_path)
+        
         return {
             "datasets_dir": self.datasets_dir,
             "reference_dir": self.reference_dir,
             "reference_genome": self.reference_genome,
+            "reference_genome_gz": self.reference_genome_gz,
             "fastq_dir": self.fastq_dir,
             "bam_dir": self.bam_dir,
             "vcf_dir": self.vcf_dir,
             "annotation_dir": self.annotation_dir,
-            "reference_exists": Path(self.reference_genome).exists(),
+            "reference_exists": genome_path.exists(),
+            "reference_gz_exists": Path(self.reference_genome_gz).exists(),
+            "bwa_index_complete": bwa_index_complete,
             "available_samples": self.get_available_samples(),
             "bam_files": self._list_files(self.bam_dir, "*.bam"),
             "vcf_files": self._list_files(self.vcf_dir, "*.vcf")
