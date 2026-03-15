@@ -10,9 +10,13 @@ License: MIT
 """
 
 import os
+import re
+import subprocess
+import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 
 # Import services
@@ -262,6 +266,99 @@ async def get_pipeline_status():
     """Get pipeline status and available files"""
     pipeline_client = get_bio_pipeline_client()
     return pipeline_client.get_pipeline_status()
+
+
+@app.post("/analysis/run-docker", tags=["Analysis"], summary="Run pipeline in Docker container", description="""
+    Run Pipeline in Docker Container
+    
+    Execute the bioinformatics pipeline inside the bio-pipeline Docker container.
+    This provides a more isolated and consistent environment for pipeline execution.
+    
+    Args:
+        sample_id: Unique identifier for the sample (e.g., SRR1517848)
+        reference: Reference genome (hg38 or hg19)
+        
+    Returns:
+        Streaming logs from the pipeline execution
+    """)
+async def run_pipeline_docker(sample_id: str, reference: str = "hg38"):
+    """
+    Run pipeline in Docker container with streaming output
+    """
+    import asyncio
+    
+    # Validate sample exists
+    fastq_dir = "/datasets/fastq"
+    sample_files = []
+    
+    # Look for sample files
+    for ext in ['.fastq', '.fastq.gz', '.fq', '.fq.gz']:
+        f1 = f"{fastq_dir}/{sample_id}_1{ext}"
+        f2 = f"{fastq_dir}/{sample_id}_2{ext}"
+        if os.path.exists(f1):
+            sample_files.append(f1)
+        if os.path.exists(f2):
+            sample_files.append(f2)
+    
+    if not sample_files:
+        # Check for single end files
+        single = f"{fastq_dir}/{sample_id}{ext}"
+        for ext in ['.fastq', '.fastq.gz', '.fq', '.fq.gz']:
+            if os.path.exists(f"{fastq_dir}/{sample_id}{ext}"):
+                sample_files.append(f"{fastq_dir}/{sample_id}{ext}")
+                break
+    
+    if not sample_files:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Sample {sample_id} not found in {fastq_dir}"
+        )
+    
+    async def generate_logs():
+        """Generate streaming output from Docker pipeline"""
+        # Set environment variables
+        env = os.environ.copy()
+        env["SAMPLE_ID"] = sample_id
+        env["REFERENCE_GENOME"] = f"/datasets/reference_genome/{reference}.fa"
+        
+        # Run pipeline in Docker
+        cmd = [
+            "docker", "exec", "-i", "ai-genomics-bio",
+            "/bin/bash", "-c",
+            f"cd /datasets && SAMPLE_ID={sample_id} bash /pipeline/scripts/pipeline.sh 2>&1"
+        ]
+        
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                text=True,
+                bufsize=1
+            )
+            
+            # Stream output line by line
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    yield f"data: {line}\n\n"
+            
+            process.stdout.close()
+            process.wait()
+            
+        except FileNotFoundError:
+            yield "data: Error: Docker command not found\n\n"
+        except Exception as e:
+            yield f"data: Error: {str(e)}\n\n"
+    
+    return StreamingResponse(
+        generate_logs(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
 
 
 # =======================

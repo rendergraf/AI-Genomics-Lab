@@ -95,6 +95,9 @@ services:
       context: ../bio-pipeline
       dockerfile: Dockerfile
     container_name: ai-genomics-bio
+    command: tail -f /dev/null
+    mem_limit: 24g
+    mem_reservation: 16g
     volumes:
       - ../bio-pipeline:/pipeline
       - ../datasets:/datasets
@@ -104,8 +107,8 @@ services:
       - datasets-annotations:/datasets/annotations
       - reference-data:/reference
     environment:
-      - REFERENCE_GENOME_GZ=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz
-      - REFERENCE_GENOME=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa
+      - REFERENCE_GENOME_GZ=/datasets/reference_genome/hg38.fa.gz
+      - REFERENCE_GENOME=/datasets/reference_genome/hg38.fa
       - INPUT_DIR=/datasets/fastq
       - OUTPUT_DIR=/datasets/bam
       - VCF_OUTPUT_DIR=/datasets/vcf
