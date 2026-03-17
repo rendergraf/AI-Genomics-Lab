@@ -12,7 +12,7 @@ import VariantTable from '@/components/VariantTable'
 import GenomeBrowser from '@/components/GenomeBrowser'
 import api from '@/lib/api'
 
-type TabType = 'dashboard' | 'variants' | 'knowledge' | 'analysis' | 'genome' | 'settings'
+type TabType = 'dashboard' | 'variants' | 'knowledge' | 'analysis' | 'genome' | 'settings' | 'genomes' | 'samples'
 
 // Types
 interface ServiceStatus {
@@ -45,7 +45,7 @@ interface DashboardStats {
 }
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<TabType>('analysis') // Start on analysis tab for testing
+  const [activeTab, setActiveTab] = useState<TabType>('genomes') // Start on genomes tab for managing reference genomes
 
   const renderContent = () => {
     switch (activeTab) {
@@ -65,6 +65,10 @@ export default function Home() {
             <GraphView />
           </div>
         )
+      case 'genomes':
+        return <ReferenceGenomesContent />
+      case 'samples':
+        return <SamplesContent />
       case 'analysis':
         return <AnalysisContent />
       case 'genome':
@@ -109,6 +113,8 @@ export default function Home() {
               { id: 'dashboard', label: 'Dashboard', icon: Activity },
               { id: 'variants', label: 'Variants', icon: Dna },
               { id: 'knowledge', label: 'Knowledge Graph', icon: Network },
+              { id: 'genomes', label: 'Reference Genomes', icon: Database },
+              { id: 'samples', label: 'Samples/Tests', icon: Beaker },
               { id: 'analysis', label: 'Analysis', icon: Beaker },
               { id: 'genome', label: 'Genome Browser', icon: FolderOpen },
               { id: 'settings', label: 'Settings', icon: Settings },
@@ -410,59 +416,75 @@ function AnalysisContent() {
     addLog('')
 
     try {
-      // Simulate pipeline steps with logs
-      addLog('📥 Step 1/5: Checking input files...')
-      await new Promise(r => setTimeout(r, 1000))
-      addLog('✅ Input files validated')
+      // Use new streaming progress API
+      const eventSource = api.runPipelineWithProgress(sampleId, selectedGenome)
       
-      addLog('🧬 Step 2/5: Building BWA index...')
-      await new Promise(r => setTimeout(r, 1500))
-      addLog('✅ BWA index ready')
-      
-      addLog('📊 Step 3/5: Aligning reads to reference genome...')
-      await new Promise(r => setTimeout(r, 2000))
-      addLog('✅ Alignment complete')
-      
-      addLog('🔄 Step 4/5: Sorting and indexing BAM...')
-      await new Promise(r => setTimeout(r, 1000))
-      addLog('✅ BAM sorted and indexed')
-      
-      addLog('🧪 Step 5/5: Calling variants with bcftools...')
-      await new Promise(r => setTimeout(r, 1500))
-      addLog('✅ Variant calling complete')
-      
-      // Try to call actual API
-      try {
-        const result = await api.runAnalysis(sampleId, {
-          reference_genome: selectedGenome,
-          variant_caller: selectedCaller
-        })
-        
-        if (result.data) {
-          addLog(`📋 Found ${(result.data as any).variant_count || 0} variants`)
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          
+          // Handle different progress types
+          if (data.type === 'start') {
+            addLog(`📋 ${data.message}`)
+          } else if (data.type === 'progress') {
+            if (data.step) {
+              addLog(`📊 Step ${data.step}: ${data.message || ''}`)
+            }
+            if (data.progress !== undefined) {
+              setJobStatus(prev => prev ? { 
+                ...prev, 
+                progress: data.progress,
+                status: 'running'
+              } : null)
+            }
+            if (data.file_name && data.file_size) {
+              addLog(`📁 ${data.file_name}: ${data.file_size}`)
+            }
+            if (data.duration_minutes !== undefined) {
+              addLog(`⏱️ Duration: ${data.duration_minutes}m ${data.duration_seconds}s`)
+            }
+          } else if (data.type === 'complete') {
+            addLog(`✅ Pipeline completed in ${data.duration_seconds?.toFixed(1)}s`)
+            setJobStatus({
+              id: Date.now().toString(),
+              sampleId,
+              status: 'completed',
+              progress: 100,
+              startTime: data.timestamp,
+              endTime: data.timestamp
+            })
+          } else if (data.type === 'output') {
+            addLog(`📄 Output files:`)
+            if (data.cram_file) addLog(`   CRAM: ${data.cram_file}`)
+            if (data.bam_file) addLog(`   BAM: ${data.bam_file}`)
+            if (data.vcf_file) addLog(`   VCF: ${data.vcf_file}`)
+          } else if (data.type === 'error') {
+            addLog(`❌ Error: ${data.message}`)
+            setJobStatus(prev => prev ? { ...prev, status: 'failed' } : null)
+          } else if (data.raw_output) {
+            // Regular log line
+            addLog(data.raw_output)
+          }
+        } catch (e) {
+          // If not JSON, treat as raw log line
+          addLog(event.data)
         }
-      } catch (apiError) {
-        // API might not be available, that's okay
-        addLog(`📋 Found 5 variants (demo mode)`)
       }
-
-      addLog('')
-      addLog('🎉 Pipeline completed successfully!')
       
-      setJobStatus({
-        id: Date.now().toString(),
-        sampleId,
-        status: 'completed',
-        progress: 100,
-        startTime: new Date().toISOString(),
-        endTime: new Date().toISOString()
-      })
+      eventSource.onerror = (error) => {
+        addLog(`❌ Connection error: ${error}`)
+        eventSource.close()
+        setIsRunning(false)
+      }
+      
+      // Store eventSource for cleanup
+      (window as any).__pipelineEventSource = eventSource
+      
     } catch (error: any) {
       addLog(`❌ Error: ${error.message}`)
       setJobStatus(prev => prev ? { ...prev, status: 'failed' } : null)
+      setIsRunning(false)
     }
-    
-    setIsRunning(false)
   }
 
   const runAIAnalysis = async () => {
@@ -806,6 +828,562 @@ function StatCard({ icon: Icon, label, value, isLoading }: { icon: any, label: s
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ==================== REFERENCE GENOMES ====================
+
+interface ReferenceGenome {
+  id: number
+  name: string
+  species: string
+  build: string
+  status: string
+  file_path: string
+  gz_path?: string
+  created_at?: string
+}
+
+function ReferenceGenomesContent() {
+  const [genomes, setGenomes] = useState<ReferenceGenome[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [showUpload, setShowUpload] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [indexing, setIndexing] = useState<number | null>(null)
+  const [consoleOutput, setConsoleOutput] = useState<string[]>([])
+  const [showConsole, setShowConsole] = useState(false)
+  const [seeding, setSeeding] = useState(false)
+  
+  // Upload form
+  const [name, setName] = useState('')
+  const [species, setSpecies] = useState('')
+  const [build, setBuild] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+
+  const fetchGenomes = async () => {
+    setIsLoading(true)
+    try {
+      const result = await api.getReferenceGenomes()
+      if (result.data) {
+        setGenomes(result.data.genomes || [])
+      }
+    } catch (error) {
+      console.error('Error fetching genomes:', error)
+    }
+    setIsLoading(false)
+  }
+
+  // Auto-seed on mount
+  useEffect(() => {
+    const seedAndFetch = async () => {
+      setSeeding(true)
+      try {
+        await api.seedExistingData()
+      } catch (e) {
+        // Ignore seed errors
+      }
+      await fetchGenomes()
+      setSeeding(false)
+    }
+    seedAndFetch()
+  }, [])
+
+  const handleUpload = async () => {
+    if (!name || !species || !build || !file) return
+    
+    setUploading(true)
+    try {
+      await api.uploadReferenceGenome(name, species, build, file)
+      setShowUpload(false)
+      setName('')
+      setSpecies('')
+      setBuild('')
+      setFile(null)
+      fetchGenomes()
+    } catch (error) {
+      console.error('Upload error:', error)
+    }
+    setUploading(false)
+  }
+
+  const handleIndex = (genomeId: number) => {
+    setIndexing(genomeId)
+    setShowConsole(true)
+    setConsoleOutput([])
+    
+    const eventSource = api.indexReferenceGenome(genomeId)
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.message) {
+          setConsoleOutput(prev => [...prev, data.message])
+        }
+        if (data.type === 'complete') {
+          setIndexing(null)
+          fetchGenomes()
+        }
+      } catch (e) {
+        setConsoleOutput(prev => [...prev, event.data])
+      }
+    }
+    
+    eventSource.onerror = () => {
+      setIndexing(null)
+    }
+  }
+
+  const handleDelete = async (genomeId: number) => {
+    if (!confirm('Are you sure you want to delete this reference genome?')) return
+    
+    try {
+      await api.deleteReferenceGenome(genomeId)
+      fetchGenomes()
+    } catch (error) {
+      console.error('Delete error:', error)
+    }
+  }
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'ready': return <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">Ready</span>
+      case 'indexing': return <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">Indexing</span>
+      case 'error': return <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs">Error</span>
+      default: return <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded-full text-xs">Uploaded</span>
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-semibold">Reference Genomes</h2>
+        <button 
+          onClick={() => setShowUpload(!showUpload)}
+          className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md"
+        >
+          <Upload className="h-4 w-4" /> Upload Genome
+        </button>
+      </div>
+
+      {showUpload && (
+        <div className="p-6 bg-card rounded-lg border">
+          <h3 className="text-lg font-semibold mb-4">Upload Reference Genome</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Name (e.g., hg38)</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full px-3 py-2 rounded-md border bg-background"
+                placeholder="hg38"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Species</label>
+              <input
+                type="text"
+                value={species}
+                onChange={(e) => setSpecies(e.target.value)}
+                className="w-full px-3 py-2 rounded-md border bg-background"
+                placeholder="Homo sapiens"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Build (e.g., GRCh38)</label>
+              <input
+                type="text"
+                value={build}
+                onChange={(e) => setBuild(e.target.value)}
+                className="w-full px-3 py-2 rounded-md border bg-background"
+                placeholder="GRCh38"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">FASTA File</label>
+              <input
+                type="file"
+                accept=".fa,.fasta,.fa.gz,.fasta.gz"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="w-full px-3 py-2 rounded-md border bg-background"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button 
+              onClick={handleUpload}
+              disabled={uploading || !name || !species || !build || !file}
+              className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md disabled:opacity-50"
+            >
+              {uploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {uploading ? 'Uploading...' : 'Upload'}
+            </button>
+            <button 
+              onClick={() => setShowUpload(false)}
+              className="px-4 py-2 rounded-md border"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Genomes List */}
+      <div className="grid gap-4">
+        {isLoading ? (
+          <div className="p-6 bg-card rounded-lg border">
+            <RefreshCw className="h-6 w-6 animate-spin" />
+          </div>
+        ) : genomes.length === 0 ? (
+          <div className="p-6 bg-card rounded-lg border text-center text-muted-foreground">
+            No reference genomes uploaded yet
+          </div>
+        ) : (
+          genomes.map(genome => (
+            <div key={genome.id} className="p-6 bg-card rounded-lg border">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-lg font-semibold">{genome.name}</h3>
+                    {getStatusBadge(genome.status)}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {genome.species} • {genome.build}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {genome.file_path}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  {genome.status === 'uploaded' && (
+                    <button 
+                      onClick={() => handleIndex(genome.id)}
+                      disabled={indexing === genome.id}
+                      className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1 rounded-md text-sm disabled:opacity-50"
+                    >
+                      {indexing === genome.id ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                      Index
+                    </button>
+                  )}
+                  {genome.status === 'ready' && (
+                    <span className="text-sm text-green-600 flex items-center gap-1">
+                      <CheckCircle className="h-4 w-4" /> Indexed
+                    </span>
+                  )}
+                  <button 
+                    onClick={() => handleDelete(genome.id)}
+                    className="p-2 hover:bg-red-100 rounded-md text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Console Output */}
+      {showConsole && consoleOutput.length > 0 && (
+        <div className="p-6 bg-card rounded-lg border">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Indexing Progress</h3>
+            <button onClick={() => setShowConsole(false)} className="p-1 hover:bg-accent rounded">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="bg-black text-green-400 font-mono text-sm p-4 rounded-lg h-48 overflow-y-auto">
+            {consoleOutput.map((line, i) => (
+              <div key={i}>{line}</div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ==================== SAMPLES ====================
+
+interface Sample {
+  id: number
+  name: string
+  sample_type: string
+  reference_genome_id: number
+  reference_genome_name?: string
+  status: string
+  r1_path?: string
+  r2_path?: string
+  vcf_path?: string
+  created_at?: string
+}
+
+function SamplesContent() {
+  const [samples, setSamples] = useState<Sample[]>([])
+  const [genomes, setGenomes] = useState<ReferenceGenome[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [showUpload, setShowUpload] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [processing, setProcessing] = useState<number | null>(null)
+  const [consoleOutput, setConsoleOutput] = useState<string[]>([])
+  const [showConsole, setShowConsole] = useState(false)
+  
+  // Upload form
+  const [name, setName] = useState('')
+  const [referenceGenomeId, setReferenceGenomeId] = useState<number | ''>('')
+  const [r1File, setR1File] = useState<File | null>(null)
+  const [r2File, setR2File] = useState<File | null>(null)
+
+  const fetchData = async () => {
+    setIsLoading(true)
+    try {
+      const [samplesResult, genomesResult] = await Promise.all([
+        api.getSamples(),
+        api.getReferenceGenomes()
+      ])
+      if (samplesResult.data) {
+        setSamples(samplesResult.data.samples || [])
+      }
+      if (genomesResult.data) {
+        setGenomes(genomesResult.data.genomes || [])
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error)
+    }
+    setIsLoading(false)
+  }
+
+  // Auto-seed on mount
+  useEffect(() => {
+    const seedAndFetch = async () => {
+      try {
+        await api.seedExistingData()
+      } catch (e) {
+        // Ignore seed errors
+      }
+      await fetchData()
+    }
+    seedAndFetch()
+  }, [])
+
+  const readyGenomes = genomes.filter(g => g.status === 'ready')
+
+  const handleUpload = async () => {
+    if (!name || !referenceGenomeId || !r1File) return
+    
+    setUploading(true)
+    try {
+      await api.uploadSample(name, referenceGenomeId as number, r1File, r2File || undefined)
+      setShowUpload(false)
+      setName('')
+      setReferenceGenomeId('')
+      setR1File(null)
+      setR2File(null)
+      fetchData()
+    } catch (error) {
+      console.error('Upload error:', error)
+    }
+    setUploading(false)
+  }
+
+  const handleRun = (sampleId: number) => {
+    setProcessing(sampleId)
+    setShowConsole(true)
+    setConsoleOutput([])
+    
+    const eventSource = api.runSamplePipeline(sampleId)
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.message) {
+          setConsoleOutput(prev => [...prev, data.message])
+        }
+        if (data.type === 'complete') {
+          setProcessing(null)
+          fetchData()
+        }
+      } catch (e) {
+        setConsoleOutput(prev => [...prev, event.data])
+      }
+    }
+    
+    eventSource.onerror = () => {
+      setProcessing(null)
+    }
+  }
+
+  const handleDelete = async (sampleId: number) => {
+    if (!confirm('Are you sure you want to delete this sample?')) return
+    
+    try {
+      await api.deleteSample(sampleId)
+      fetchData()
+    } catch (error) {
+      console.error('Delete error:', error)
+    }
+  }
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'completed': return <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">Completed</span>
+      case 'processing': return <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">Processing</span>
+      case 'failed': return <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs">Failed</span>
+      default: return <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded-full text-xs">Uploaded</span>
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-semibold">Samples / Tests</h2>
+        <button 
+          onClick={() => setShowUpload(!showUpload)}
+          disabled={readyGenomes.length === 0}
+          className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md disabled:opacity-50"
+        >
+          <Upload className="h-4 w-4" /> Upload Sample
+        </button>
+      </div>
+
+      {showUpload && (
+        <div className="p-6 bg-card rounded-lg border">
+          <h3 className="text-lg font-semibold mb-4">Upload Sample (FASTQ)</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Sample Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full px-3 py-2 rounded-md border bg-background"
+                placeholder="SRR1517848"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Reference Genome</label>
+              <select
+                value={referenceGenomeId}
+                onChange={(e) => setReferenceGenomeId(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-md border bg-background"
+              >
+                <option value="">Select genome...</option>
+                {readyGenomes.map(g => (
+                  <option key={g.id} value={g.id}>{g.name} ({g.build})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Forward Read (R1)</label>
+              <input
+                type="file"
+                accept=".fastq,.fastq.gz,.fq,.fq.gz"
+                onChange={(e) => setR1File(e.target.files?.[0] || null)}
+                className="w-full px-3 py-2 rounded-md border bg-background"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Reverse Read (R2) - Optional</label>
+              <input
+                type="file"
+                accept=".fastq,.fastq.gz,.fq,.fq.gz"
+                onChange={(e) => setR2File(e.target.files?.[0] || null)}
+                className="w-full px-3 py-2 rounded-md border bg-background"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button 
+              onClick={handleUpload}
+              disabled={uploading || !name || !referenceGenomeId || !r1File}
+              className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md disabled:opacity-50"
+            >
+              {uploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {uploading ? 'Uploading...' : 'Upload'}
+            </button>
+            <button 
+              onClick={() => setShowUpload(false)}
+              className="px-4 py-2 rounded-md border"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Samples List */}
+      <div className="grid gap-4">
+        {isLoading ? (
+          <div className="p-6 bg-card rounded-lg border">
+            <RefreshCw className="h-6 w-6 animate-spin" />
+          </div>
+        ) : samples.length === 0 ? (
+          <div className="p-6 bg-card rounded-lg border text-center text-muted-foreground">
+            No samples uploaded yet. Upload a reference genome first!
+          </div>
+        ) : (
+          samples.map(sample => (
+            <div key={sample.id} className="p-6 bg-card rounded-lg border">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-lg font-semibold">{sample.name}</h3>
+                    {getStatusBadge(sample.status)}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {sample.sample_type} • Reference: {sample.reference_genome_name}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {sample.r1_path}
+                    {sample.r2_path && ` + ${sample.r2_path}`}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  {sample.status === 'uploaded' && (
+                    <button 
+                      onClick={() => handleRun(sample.id)}
+                      disabled={processing === sample.id}
+                      className="flex items-center gap-2 bg-green-600 text-white px-3 py-1 rounded-md text-sm disabled:opacity-50"
+                    >
+                      {processing === sample.id ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                      Run Pipeline
+                    </button>
+                  )}
+                  {sample.status === 'completed' && sample.vcf_path && (
+                    <span className="text-sm text-green-600 flex items-center gap-1">
+                      <CheckCircle className="h-4 w-4" /> VCF Ready
+                    </span>
+                  )}
+                  <button 
+                    onClick={() => handleDelete(sample.id)}
+                    className="p-2 hover:bg-red-100 rounded-md text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Console Output */}
+      {showConsole && consoleOutput.length > 0 && (
+        <div className="p-6 bg-card rounded-lg border">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Pipeline Progress</h3>
+            <button onClick={() => setShowConsole(false)} className="p-1 hover:bg-accent rounded">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="bg-black text-green-400 font-mono text-sm p-4 rounded-lg h-48 overflow-y-auto">
+            {consoleOutput.map((line, i) => (
+              <div key={i}>{line}</div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

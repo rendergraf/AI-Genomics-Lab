@@ -13,10 +13,11 @@ import os
 import re
 import logging
 import subprocess
-from typing import Optional, List, Dict, Any
+import threading
+import time
+from typing import Optional, List, Dict, Any, Callable, Generator
 from datetime import datetime
 from pathlib import Path
-
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -324,6 +325,187 @@ class BioPipelineClient:
             samples.add(sample_name)
         
         return sorted(samples)
+    
+    def run_pipeline_streaming(
+        self,
+        input_file: str,
+        sample_id: str,
+        reference: Optional[str] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        Run the bioinformatics pipeline with real-time progress updates.
+        
+        Args:
+            input_file: Path to input FASTQ file
+            sample_id: Sample identifier
+            reference: Optional reference genome path
+            progress_callback: Optional callback for progress updates
+            
+        Yields:
+            Dict with pipeline progress updates
+        """
+        reference = reference or self.reference_genome
+        
+        # Build environment
+        env = os.environ.copy()
+        env["REFERENCE_GENOME"] = reference
+        env["INPUT_DIR"] = self.fastq_dir
+        env["OUTPUT_DIR"] = self.bam_dir
+        env["VCF_OUTPUT_DIR"] = self.vcf_dir
+        env["ANNOTATION_DIR"] = self.annotation_dir
+        
+        pipeline_script = "/pipeline/scripts/pipeline.sh"
+        
+        # Validate pipeline script exists
+        if not Path(pipeline_script).exists():
+            alternative_paths = [
+                "/pipeline/scripts/pipeline.sh",
+                "/app/pipeline/scripts/pipeline.sh",
+                "./bio-pipeline/scripts/pipeline.sh",
+                "../bio-pipeline/scripts/pipeline.sh",
+            ]
+            found = False
+            for alt_path in alternative_paths:
+                if Path(alt_path).exists():
+                    pipeline_script = alt_path
+                    found = True
+                    break
+            if not found:
+                yield {
+                    "type": "error",
+                    "message": f"Pipeline script not found. Searched in: {alternative_paths}",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                return
+        
+        # Create logs directory
+        logs_dir = "/datasets/logs"
+        os.makedirs(logs_dir, exist_ok=True)
+        
+        start_time = datetime.utcnow()
+        
+        yield {
+            "type": "start",
+            "sample_id": sample_id,
+            "message": f"Starting pipeline for sample: {sample_id}",
+            "timestamp": start_time.isoformat()
+        }
+        
+        try:
+            # Use Popen for streaming
+            process = subprocess.Popen(
+                ["/bin/bash", pipeline_script],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1  # Line buffered
+            )
+            
+            # Read output line by line
+            output_lines = []
+            for line in process.stdout:
+                output_lines.append(line.strip())
+                
+                # Parse progress from line
+                progress_update = self._parse_pipeline_output(line, sample_id)
+                if progress_update:
+                    if progress_callback:
+                        progress_callback(progress_update)
+                    yield progress_update
+            
+            # Wait for process to complete
+            return_code = process.wait()
+            
+            if return_code == 0:
+                end_time = datetime.utcnow()
+                duration = (end_time - start_time).total_seconds()
+                
+                yield {
+                    "type": "complete",
+                    "sample_id": sample_id,
+                    "message": "Pipeline completed successfully",
+                    "duration_seconds": duration,
+                    "timestamp": end_time.isoformat()
+                }
+                
+                # Find output files
+                bam_file = self._find_file(self.bam_dir, f"{sample_id}_sorted.bam")
+                cram_file = self._find_file(self.bam_dir, f"{sample_id}_sorted.cram")
+                vcf_file = self._find_vcf_file(sample_id)
+                
+                yield {
+                    "type": "output",
+                    "sample_id": sample_id,
+                    "bam_file": bam_file,
+                    "cram_file": cram_file,
+                    "vcf_file": vcf_file,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                yield {
+                    "type": "error",
+                    "sample_id": sample_id,
+                    "message": f"Pipeline failed with return code {return_code}",
+                    "output": "\n".join(output_lines[-50:]),  # Last 50 lines
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
+        except Exception as e:
+            yield {
+                "type": "error",
+                "sample_id": sample_id,
+                "message": f"Pipeline error: {str(e)}",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+    
+    def _parse_pipeline_output(self, line: str, sample_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse pipeline output line to extract progress information.
+        
+        Expected formats from pipeline.sh:
+        - [TIMESTAMP] 📊 STEP_N: message
+        - [TIMESTAMP] 📈 PROGRESS: N%
+        - [TIMESTAMP] 📁 FILE_SIZE: filename=size
+        - [TIMESTAMP] ⏱️ DURATION: Nm Ns
+        """
+        result = {
+            "type": "progress",
+            "sample_id": sample_id,
+            "raw_output": line.strip(),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        # Parse STEP progress
+        step_match = re.search(r'📊 STEP_(\d+): (.+)', line)
+        if step_match:
+            result["step"] = int(step_match.group(1))
+            result["message"] = step_match.group(2)
+            return result
+        
+        # Parse percentage progress
+        progress_match = re.search(r'📈 PROGRESS: (\d+)%', line)
+        if progress_match:
+            result["progress"] = int(progress_match.group(1))
+            return result
+        
+        # Parse file size
+        file_match = re.search(r'📁 FILE_SIZE: (.+?)=(.+)', line)
+        if file_match:
+            result["file_name"] = file_match.group(1)
+            result["file_size"] = file_match.group(2)
+            return result
+        
+        # Parse duration
+        duration_match = re.search(r'⏱️ DURATION: (\d+)m (\d+)s', line)
+        if duration_match:
+            result["duration_minutes"] = int(duration_match.group(1))
+            result["duration_seconds"] = int(duration_match.group(2))
+            return result
+        
+        # Return None if no pattern matched (regular log line)
+        return None
     
     def _check_bwa_index_complete(self, genome_path: Path) -> bool:
         """Check if all BWA index files exist"""

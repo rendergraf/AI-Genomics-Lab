@@ -29,6 +29,8 @@ RUN apt-get update && apt-get install -y \
     bedtools \
     # Compression tools
     gzip \
+    pv \
+    tabix \
     # Parallel processing
     parallel \
     # Other utilities

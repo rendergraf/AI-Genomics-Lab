@@ -22,6 +22,47 @@
 
 set -e
 
+# ============================================
+# OBSERVABILITY: Enhanced logging with timestamps
+# ============================================
+timestamp() {
+    date +"%Y-%m-%d %H:%M:%S"
+}
+
+# Log with timestamp and file size
+log_step() {
+    local step="$1"
+    local message="$2"
+    echo "[$(timestamp)] 📊 STEP_$step: $message"
+}
+
+# Log with file size
+log_file() {
+    local file="$1"
+    if [ -f "$file" ]; then
+        local size=$(du -h "$file" | cut -f1)
+        echo "[$(timestamp)] 📁 FILE_SIZE: $(basename $file)=$size"
+    fi
+}
+
+# Log progress percentage
+log_progress() {
+    local current="$1"
+    local total="$2"
+    local percent=$((current * 100 / total))
+    echo "[$(timestamp)] 📈 PROGRESS: $percent%"
+}
+
+# Log timing
+log_time() {
+    local start_time=$1
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    local minutes=$((duration / 60))
+    local seconds=$((duration % 60))
+    echo "[$(timestamp)] ⏱️ DURATION: ${minutes}m ${seconds}s"
+}
+
 # Configuration - Updated paths for datasets directory
 REFERENCE_GENOME_GZ="${REFERENCE_GENOME_GZ:-/datasets/reference_genome/hg38.fa.gz}"
 INPUT_DIR="${INPUT_DIR:-/datasets/fastq}"
@@ -41,6 +82,7 @@ PRELOAD_RAM="${PRELOAD_RAM:-false}"  # Preload reference in RAM
 echo "=========================================="
 echo "🧬 AI Genomics Lab - Bio Pipeline (ADVANCED OPTIMIZED)"
 echo "=========================================="
+echo "[$(timestamp)] STARTING pipeline execution"
 echo "Reference: $REFERENCE_GENOME_GZ (BGZF COMPRESSED)"
 echo "Input: $INPUT_DIR"
 echo "Output: $OUTPUT_DIR"
@@ -51,6 +93,10 @@ echo "Parallel: $PARALLEL"
 echo "Use CRAM: $USE_CRAM"
 echo "Preload RAM: $PRELOAD_RAM"
 echo "=========================================="
+
+# Record overall start time
+PIPELINE_START_TIME=$(date +%s)
+log_step "0" "Pipeline initialization complete"
 
 # Create output directories
 mkdir -p "$OUTPUT_DIR" "$VCF_OUTPUT_DIR" "$LOGS_DIR"
@@ -63,6 +109,10 @@ if [ ! -f "${REFERENCE_GENOME_GZ}" ]; then
     echo "And: samtools faidx Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz"
     exit 1
 fi
+
+# Log reference genome info
+log_step "1" "Reference genome validation"
+log_file "$REFERENCE_GENOME_GZ"
 
 # Check if input files exist (support both .fastq and .fastq.gz)
 if [ ! "$(ls -A $INPUT_DIR 2>/dev/null)" ]; then
@@ -197,27 +247,32 @@ process_sample() {
     local sorted_cram="$output_dir/${basename}_sorted.cram"
     local output_file=""
     
+    # Track step timing
+    local alignment_start=$(date +%s)
+    log_step "2" "Starting alignment for $basename"
+    log_progress 20 100
+    
     if [ -f "$r1" ] && [ -f "$r2" ]; then
         # Paired-end alignment with streaming (no samtools view)
-        echo "📊 Step 1: Paired-end Alignment with strobealign (direct streaming)..."
+        echo "[$(timestamp)] 📊 Step 1: Paired-end Alignment with strobealign (direct streaming)..."
         strobealign -t "$threads" "$reference_genome" "$r1" "$r2" 2> "$logs_dir/${basename}_strobealign.log" | \
             samtools sort -@ "$threads" -o "$sorted_bam" 2> "$logs_dir/${basename}_samtools_sort.log"
         output_file="$sorted_bam"
     elif [ -f "$single_end" ]; then
         # Single-end alignment with streaming
-        echo "📊 Step 1: Single-end Alignment with strobealign (direct streaming)..."
+        echo "[$(timestamp)] 📊 Step 1: Single-end Alignment with strobealign (direct streaming)..."
         strobealign -t "$threads" "$reference_genome" "$single_end" 2> "$logs_dir/${basename}_strobealign.log" | \
             samtools sort -@ "$threads" -o "$sorted_bam" 2> "$logs_dir/${basename}_samtools_sort.log"
         output_file="$sorted_bam"
     elif [ -f "$r1_uncompressed" ] && [ -f "$r2_uncompressed" ]; then
         # Paired-end uncompressed (legacy support)
-        echo "📊 Step 1: Paired-end Alignment with strobealign (direct streaming)..."
+        echo "[$(timestamp)] 📊 Step 1: Paired-end Alignment with strobealign (direct streaming)..."
         strobealign -t "$threads" "$reference_genome" "$r1_uncompressed" "$r2_uncompressed" 2> "$logs_dir/${basename}_strobealign.log" | \
             samtools sort -@ "$threads" -o "$sorted_bam" 2> "$logs_dir/${basename}_samtools_sort.log"
         output_file="$sorted_bam"
     elif [ -f "$single_end_uncompressed" ]; then
         # Single-end uncompressed (legacy support)
-        echo "📊 Step 1: Single-end Alignment with strobealign (direct streaming)..."
+        echo "[$(timestamp)] 📊 Step 1: Single-end Alignment with strobealign (direct streaming)..."
         strobealign -t "$threads" "$reference_genome" "$single_end_uncompressed" 2> "$logs_dir/${basename}_strobealign.log" | \
             samtools sort -@ "$threads" -o "$sorted_bam" 2> "$logs_dir/${basename}_samtools_sort.log"
         output_file="$sorted_bam"
@@ -227,11 +282,19 @@ process_sample() {
         return 1
     fi
     
+    # Log alignment timing and file size
+    local alignment_end=$(date +%s)
+    local alignment_duration=$((alignment_end - alignment_start))
+    log_step "2" "Alignment complete for $basename (${alignment_duration}s)"
+    log_file "$sorted_bam"
+    log_progress 50 100
+    
     # ============================================
     # OPTIMIZATION 3: Convert BAM to CRAM (30-60% less space)
     # ============================================
+    local cram_start=$(date +%s)
     if [ "$use_cram" = "true" ]; then
-        echo "📊 Step 1b: Converting BAM to CRAM (30-60% space saving)..."
+        echo "[$(timestamp)] 📊 Step 1b: Converting BAM to CRAM (30-60% space saving)..."
         samtools view -@ "$threads" -C \
             -T "$reference_genome" \
             -o "$sorted_cram" \
@@ -240,46 +303,77 @@ process_sample() {
         # Remove BAM to save space
         rm -f "$sorted_bam"
         output_file="$sorted_cram"
-        echo "✅ Converted to CRAM: $(ls -lh "$sorted_cram" | awk '{print $5}')"
+        local cram_end=$(date +%s)
+        local cram_duration=$((cram_end - cram_start))
+        log_step "3" "CRAM conversion complete (${cram_duration}s)"
+        log_file "$sorted_cram"
     fi
     
     # Step 2: Index CRAM/BAM
-    echo "📊 Step 2: Indexing $use_cram..."
+    local index_start=$(date +%s)
+    echo "[$(timestamp)] 📊 Step 2: Indexing $output_file..."
     samtools index "$output_file" 2> "$logs_dir/${basename}_samtools_index.log"
+    local index_end=$(date +%s)
+    local index_duration=$((index_end - index_start))
+    log_step "4" "Indexing complete (${index_duration}s)"
+    log_progress 60 100
     
     # ============================================
     # OPTIMIZATION 4: mpileup with multithreading real
     # ============================================
     # Step 3: Variant Calling (using BCF binary for faster I/O)
-    echo "📊 Step 3: Variant Calling with bcftools (BCF binary, multithreaded)..."
+    local variant_start=$(date +%s)
+    echo "[$(timestamp)] 📊 Step 3: Variant Calling with bcftools (BCF binary, multithreaded)..."
     bcftools mpileup \
         -f "$reference_genome" \
         -Ou \
         --threads "$threads" \
         "$output_file" 2> "$logs_dir/${basename}_bcftools_mpileup.log" | \
-        bcftools call -mv -Ob -o "$vcf_output_dir/${basename}_variants.bcf" 2>> "$logs_dir/${basename}_bcftools_mpileup.log"
+    bcftools call -mv -Ob -o "$vcf_output_dir/${basename}_variants.bcf" 2>> "$logs_dir/${basename}_bcftools_mpileup.log"
     
     # Convert BCF to VCF for compatibility
-    echo "📊 Step 3b: Converting BCF to VCF..."
+    echo "[$(timestamp)] 📊 Step 3b: Converting BCF to VCF..."
     bcftools view "$vcf_output_dir/${basename}_variants.bcf" -Ov -o "$vcf_output_dir/${basename}_variants.vcf" 2> "$logs_dir/${basename}_bcftools_view.log"
     
+    local variant_end=$(date +%s)
+    local variant_duration=$((variant_end - variant_start))
+    log_step "5" "Variant calling complete (${variant_duration}s)"
+    log_file "$vcf_output_dir/${basename}_variants.vcf"
+    log_progress 80 100
+    
     # Step 4: Filter variants
-    echo "📊 Step 4: Filtering variants..."
+    local filter_start=$(date +%s)
+    echo "[$(timestamp)] 📊 Step 4: Filtering variants..."
     bcftools filter -O v -o "$vcf_output_dir/${basename}_filtered.vcf" \
         -s LOWQUAL -g 10 -S 60 "$vcf_output_dir/${basename}_variants.vcf" 2> "$logs_dir/${basename}_bcftools_filter.log"
     
+    local filter_end=$(date +%s)
+    local filter_duration=$((filter_end - filter_start))
+    log_step "6" "Variant filtering complete (${filter_duration}s)"
+    log_file "$vcf_output_dir/${basename}_filtered.vcf"
+    log_progress 90 100
+    
     # Step 5: Annotate with ClinVar if available
+    local annotate_start=$(date +%s)
     if [ -f "$annotation_dir/clinvar.vcf" ]; then
-        echo "📊 Step 5: Annotating with ClinVar..."
+        echo "[$(timestamp)] 📊 Step 5: Annotating with ClinVar..."
         bcftools annotate -a "$annotation_dir/clinvar.vcf" \
             -c CHROM,POS,ID,REF,ALT,QUAL \
             -o "$vcf_output_dir/${basename}_annotated.vcf" \
             "$vcf_output_dir/${basename}_filtered.vcf" 2> "$logs_dir/${basename}_bcftools_annotate.log"
+        local annotate_end=$(date +%s)
+        local annotate_duration=$((annotate_end - annotate_start))
+        log_step "7" "ClinVar annotation complete (${annotate_duration}s)"
+        log_file "$vcf_output_dir/${basename}_annotated.vcf"
     fi
     
     # Cleanup temp files
     cleanup
     
+    # Final timing
+    local sample_end=$(date +%s)
+    local sample_duration=$((sample_end - alignment_start))
+    log_step "100" "Sample $basename completed (total: ${sample_duration}s)"
     echo "✅ Completed: $basename"
     echo "   Output CRAM/BAM: $output_file"
     echo "   Output VCF: $vcf_output_dir/${basename}_filtered.vcf"
@@ -316,6 +410,16 @@ echo ""
 echo "=========================================="
 echo "✅ Pipeline completed successfully!"
 echo "=========================================="
+
+# Calculate total pipeline time
+PIPELINE_END_TIME=$(date +%s)
+PIPELINE_TOTAL_DURATION=$((PIPELINE_END_TIME - PIPELINE_START_TIME))
+PIPELINE_MINUTES=$((PIPELINE_TOTAL_DURATION / 60))
+PIPELINE_SECONDS=$((PIPELINE_TOTAL_DURATION % 60))
+
+log_step "FINAL" "Pipeline complete. Total time: ${PIPELINE_MINUTES}m ${PIPELINE_SECONDS}s"
+log_progress 100 100
+
 echo "CRAM/BAM files are available in: $OUTPUT_DIR"
 ls -lh "$OUTPUT_DIR"/*.cram 2>/dev/null || ls -lh "$OUTPUT_DIR"/*.bam 2>/dev/null || echo "No files"
 echo ""
@@ -324,3 +428,5 @@ ls -lh "$VCF_OUTPUT_DIR"/*.vcf 2>/dev/null || echo "No VCF files"
 echo ""
 echo "BCF files are available in: $VCF_OUTPUT_DIR"
 ls -lh "$VCF_OUTPUT_DIR"/*.bcf 2>/dev/null || echo "No BCF files"
+echo ""
+echo "[$(timestamp)] ⏱️ Total pipeline execution time: ${PIPELINE_MINUTES}m ${PIPELINE_SECONDS}s"

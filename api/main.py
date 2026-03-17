@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from services.llm_client import get_llm_client
 from services.neo4j_service import get_neo4j_service
 from services.bio_pipeline_client import get_bio_pipeline_client
+from services.database_service import get_database_service
 
 # Import agents
 from agents import (
@@ -55,12 +56,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️ Neo4j connection warning: {e}")
     
+    # Initialize PostgreSQL connection
+    db_service = get_database_service()
+    try:
+        await db_service.connect()
+        print("✅ PostgreSQL connected and schema initialized")
+    except Exception as e:
+        print(f"⚠️ PostgreSQL connection warning: {e}")
+    
     yield
     
     # Shutdown
     print("🛑 AI Genomics Lab API shutting down...")
     neo4j_service = get_neo4j_service()
     await neo4j_service.close()
+    
+    db_service = get_database_service()
+    await db_service.close()
 
 
 # Create FastAPI application
@@ -359,6 +371,548 @@ async def run_pipeline_docker(sample_id: str, reference: str = "hg38"):
             "Connection": "keep-alive",
         }
     )
+
+
+@app.get("/analysis/stream-progress/{sample_id}", tags=["Analysis"], summary="Run pipeline with progress streaming", description="""
+    Run Pipeline with Real-time Progress Updates
+    
+    Execute the bioinformatics pipeline and receive structured progress updates
+    including step numbers, percentages, file sizes, and timing information.
+    
+    This endpoint uses Server-Sent Events (SSE) to stream progress updates
+    that can be used to display progress bars and status in the UI.
+    
+    Args:
+        sample_id: Unique identifier for the sample (e.g., SRR1517848)
+        reference: Reference genome (hg38 or hg19)
+        
+    Returns:
+        Streaming progress updates in SSE format
+""")
+async def run_pipeline_with_progress(sample_id: str, reference: str = "hg38"):
+    """
+    Run pipeline with structured progress streaming
+    """
+    import json
+    
+    # Validate sample exists
+    fastq_dir = "/datasets/fastq"
+    sample_files = []
+    
+    for ext in ['.fastq', '.fastq.gz', '.fq', '.fq.gz']:
+        f1 = f"{fastq_dir}/{sample_id}_1{ext}"
+        f2 = f"{fastq_dir}/{sample_id}_2{ext}"
+        if os.path.exists(f1):
+            sample_files.append(f1)
+        if os.path.exists(f2):
+            sample_files.append(f2)
+    
+    if not sample_files:
+        for ext in ['.fastq', '.fastq.gz', '.fq', '.fq.gz']:
+            if os.path.exists(f"{fastq_dir}/{sample_id}{ext}"):
+                sample_files.append(f"{fastq_dir}/{sample_id}{ext}")
+                break
+    
+    if not sample_files:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Sample {sample_id} not found in {fastq_dir}"
+        )
+    
+    pipeline_client = get_bio_pipeline_client()
+    
+    async def generate_progress():
+        """Generate structured progress updates"""
+        try:
+            # Start the pipeline and yield progress updates
+            for progress in pipeline_client.run_pipeline_streaming(
+                input_file=sample_files[0],
+                sample_id=sample_id,
+                reference=f"/datasets/reference_genome/{reference}.fa.gz"
+            ):
+                # Format as SSE
+                yield f"data: {json.dumps(progress)}\n\n"
+                
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_progress(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
+
+# =======================
+# Reference Genomes Endpoints
+# =======================
+
+@app.get("/reference-genomes", tags=["Reference Genomes"], summary="List reference genomes")
+async def list_reference_genomes():
+    """Get all reference genomes"""
+    db = get_database_service()
+    genomes = await db.get_reference_genomes()
+    return {
+        "genomes": [
+            {
+                "id": g.id,
+                "name": g.name,
+                "species": g.species,
+                "build": g.build,
+                "status": g.status,
+                "file_path": g.file_path,
+                "gz_path": g.gz_path,
+                "created_at": g.created_at.isoformat() if g.created_at else None
+            }
+            for g in genomes
+        ]
+    }
+
+
+@app.post("/reference-genomes", tags=["Reference Genomes"], summary="Upload reference genome")
+async def upload_reference_genome(
+    name: str,
+    species: str,
+    build: str,
+    file: UploadFile = File(...)
+):
+    """
+    Upload a reference genome FASTA file
+    """
+    # Save file to reference genome directory
+    reference_dir = "/datasets/reference_genome"
+    os.makedirs(reference_dir, exist_ok=True)
+    
+    file_path = f"{reference_dir}/{file.filename}"
+    content = await file.read()
+    
+    with open(file_path, "wb") as f:
+        f.write(content)
+    
+    # Create database entry
+    db = get_database_service()
+    genome = await db.create_reference_genome(
+        name=name,
+        species=species,
+        build=build,
+        file_path=file_path
+    )
+    
+    return {
+        "id": genome.id,
+        "name": genome.name,
+        "species": genome.species,
+        "build": genome.build,
+        "status": genome.status,
+        "file_path": genome.file_path,
+        "message": "Reference genome uploaded. Use /reference-genomes/{id}/index to index it."
+    }
+
+
+@app.get("/reference-genomes/{genome_id}/index", tags=["Reference Genomes"], summary="Index reference genome")
+async def index_reference_genome(genome_id: int):
+    """
+    Index a reference genome (compress, create FAI, GZI, STI indexes)
+    """
+    db = get_database_service()
+    genome = await db.get_reference_genome(genome_id)
+    
+    if not genome:
+        raise HTTPException(status_code=404, detail="Reference genome not found")
+    
+    # Update status to indexing
+    await db.update_reference_genome_status(genome_id, "indexing")
+    
+    async def generate_indexing_logs():
+        """Generate streaming output from genome indexing"""
+        import json
+        
+        # Set environment variables
+        env = os.environ.copy()
+        env["INPUT_FA"] = genome.file_path
+        
+        # Run indexing pipeline in Docker
+        cmd = [
+            "docker", "exec", "-i", "ai-genomics-bio",
+            "/bin/bash", "-c",
+            f"INPUT_FA={genome.file_path} bash /pipeline/scripts/index_genome.sh 2>&1"
+        ]
+        
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                text=True,
+                bufsize=1
+            )
+            
+            # Parse output paths
+            gz_path = f"{genome.file_path}.gz"
+            fai_path = f"{genome.file_path}.gz.fai"
+            gzi_path = f"{genome.file_path}.gz.gzi"
+            sti_path = f"{genome.file_path}.gz.r150.sti"
+            
+            # Stream output line by line
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    yield f"data: {json.dumps({'type': 'log', 'message': line.strip()})}\n\n"
+                    
+                    # Parse output paths from the script
+                    if "GZ_PATH=" in line:
+                        gz_path = line.split("=")[1].strip()
+                    elif "FAI_PATH=" in line:
+                        fai_path = line.split("=")[1].strip()
+                    elif "GZI_PATH=" in line:
+                        gzi_path = line.split("=")[1].strip()
+                    elif "STI_PATH=" in line:
+                        sti_path = line.split("=")[1].strip()
+            
+            process.stdout.close()
+            return_code = process.wait()
+            
+            if return_code == 0:
+                # Update database with indexed paths
+                await db.update_reference_genome_status(
+                    genome_id,
+                    "ready",
+                    gz_path=gz_path,
+                    fai_path=fai_path,
+                    gzi_path=gzi_path,
+                    sti_path=sti_path
+                )
+                yield f"data: {json.dumps({'type': 'complete', 'message': 'Genome indexing complete!'})}\n\n"
+            else:
+                await db.update_reference_genome_status(genome_id, "error")
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Indexing failed'})}\n\n"
+                
+        except FileNotFoundError:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Docker command not found'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_indexing_logs(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
+
+@app.delete("/reference-genomes/{genome_id}", tags=["Reference Genomes"], summary="Delete reference genome")
+async def delete_reference_genome(genome_id: int):
+    """Delete a reference genome"""
+    db = get_database_service()
+    genome = await db.get_reference_genome(genome_id)
+    
+    if not genome:
+        raise HTTPException(status_code=404, detail="Reference genome not found")
+    
+    # Delete files
+    for path in [genome.file_path, genome.gz_path, genome.fai_path, genome.gzi_path, genome.sti_path]:
+        if path and os.path.exists(path):
+            os.remove(path)
+    
+    # Delete from database
+    await db.delete_reference_genome(genome_id)
+    
+    return {"message": "Reference genome deleted"}
+
+
+# =======================
+# Samples Endpoints
+# =======================
+
+@app.get("/samples", tags=["Samples"], summary="List samples")
+async def list_samples():
+    """Get all samples"""
+    db = get_database_service()
+    samples = await db.get_samples()
+    
+    # Get genome names
+    genomes = {g.id: g.name for g in await db.get_reference_genomes()}
+    
+    return {
+        "samples": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "sample_type": s.sample_type,
+                "reference_genome_id": s.reference_genome_id,
+                "reference_genome_name": genomes.get(s.reference_genome_id),
+                "status": s.status,
+                "r1_path": s.r1_path,
+                "r2_path": s.r2_path,
+                "vcf_path": s.vcf_path,
+                "created_at": s.created_at.isoformat() if s.created_at else None
+            }
+            for s in samples
+        ]
+    }
+
+
+@app.post("/samples", tags=["Samples"], summary="Upload sample files")
+async def upload_sample(
+    name: str,
+    reference_genome_id: int,
+    r1_file: UploadFile = File(...),
+    r2_file: UploadFile = File(None)
+):
+    """
+    Upload sample FASTQ files (R1 and optionally R2)
+    """
+    db = get_database_service()
+    
+    # Verify reference genome exists
+    genome = await db.get_reference_genome(reference_genome_id)
+    if not genome:
+        raise HTTPException(status_code=404, detail="Reference genome not found")
+    
+    if genome.status != "ready":
+        raise HTTPException(status_code=400, detail="Reference genome must be indexed before use")
+    
+    # Save files
+    fastq_dir = "/datasets/fastq"
+    os.makedirs(fastq_dir, exist_ok=True)
+    
+    r1_path = f"{fastq_dir}/{name}_1.fastq.gz"
+    content = await r1_file.read()
+    with open(r1_path, "wb") as f:
+        f.write(content)
+    
+    r2_path = None
+    if r2_file:
+        r2_path = f"{fastq_dir}/{name}_2.fastq.gz"
+        content = await r2_file.read()
+        with open(r2_path, "wb") as f:
+            f.write(content)
+    
+    # Determine sample type
+    sample_type = "paired-end" if r2_path else "single-end"
+    
+    # Create database entry
+    sample = await db.create_sample(
+        name=name,
+        sample_type=sample_type,
+        reference_genome_id=reference_genome_id,
+        r1_path=r1_path,
+        r2_path=r2_path
+    )
+    
+    return {
+        "id": sample.id,
+        "name": sample.name,
+        "sample_type": sample.sample_type,
+        "reference_genome_id": sample.reference_genome_id,
+        "reference_genome_name": genome.name,
+        "status": sample.status,
+        "r1_path": sample.r1_path,
+        "r2_path": sample.r2_path,
+        "message": "Sample uploaded. Use /samples/{id}/run to process it."
+    }
+
+
+@app.get("/samples/{sample_id}/run", tags=["Samples"], summary="Run sample pipeline")
+async def run_sample_pipeline(sample_id: int):
+    """
+    Run the bioinformatics pipeline on a sample
+    """
+    db = get_database_service()
+    sample = await db.get_sample(sample_id)
+    
+    if not sample:
+        raise HTTPException(status_code=404, detail="Sample not found")
+    
+    genome = await db.get_reference_genome(sample.reference_genome_id)
+    if not genome or genome.status != "ready":
+        raise HTTPException(status_code=400, detail="Reference genome not ready")
+    
+    # Update status to processing
+    await db.update_sample_status(sample_id, "processing")
+    
+    async def generate_pipeline_logs():
+        """Generate streaming output from sample pipeline"""
+        import json
+        
+        env = os.environ.copy()
+        env["REFERENCE_GENOME_GZ"] = genome.gz_path
+        
+        # Build sample input path
+        if sample.r2_path:
+            sample_input = f"{sample.name}"
+        else:
+            sample_input = f"{sample.name}"
+        
+        cmd = [
+            "docker", "exec", "-i", "ai-genomics-bio",
+            "/bin/bash", "-c",
+            f"cd /datasets/fastq && REFERENCE_GENOME_GZ={genome.gz_path} bash /pipeline/scripts/pipeline.sh 2>&1"
+        ]
+        
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                text=True,
+                bufsize=1
+            )
+            
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    yield f"data: {json.dumps({'type': 'log', 'message': line.strip()})}\n\n"
+            
+            process.stdout.close()
+            return_code = process.wait()
+            
+            if return_code == 0:
+                # Find output files
+                bam_path = f"/datasets/bam/{sample.name}_sorted.bam"
+                cram_path = f"/datasets/bam/{sample.name}_sorted.cram"
+                vcf_path = f"/datasets/vcf/{sample.name}_filtered.vcf"
+                
+                # Use CRAM if available, otherwise BAM
+                output_path = cram_path if os.path.exists(cram_path) else bam_path
+                
+                await db.update_sample_status(
+                    sample_id,
+                    "completed",
+                    bam_path=bam_path if os.path.exists(bam_path) else None,
+                    cram_path=cram_path if os.path.exists(cram_path) else None,
+                    vcf_path=vcf_path if os.path.exists(vcf_path) else None
+                )
+                yield f"data: {json.dumps({'type': 'complete', 'message': 'Pipeline complete!'})}\n\n"
+            else:
+                await db.update_sample_status(sample_id, "failed")
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Pipeline failed'})}\n\n"
+                
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_pipeline_logs(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
+
+@app.delete("/samples/{sample_id}", tags=["Samples"], summary="Delete sample")
+async def delete_sample(sample_id: int):
+    """Delete a sample and its files"""
+    db = get_database_service()
+    sample = await db.get_sample(sample_id)
+    
+    if not sample:
+        raise HTTPException(status_code=404, detail="Sample not found")
+    
+    # Delete files
+    for path in [sample.r1_path, sample.r2_path, sample.bam_path, sample.cram_path, sample.vcf_path]:
+        if path and os.path.exists(path):
+            os.remove(path)
+    
+    # Delete from database
+    await db.delete_sample(sample_id)
+    
+    return {"message": "Sample deleted"}
+
+
+@app.post("/admin/seed", tags=["Admin"], summary="Seed existing data")
+async def seed_existing_data():
+    """
+    Scan filesystem and register existing reference genomes and samples
+    """
+    db = get_database_service()
+    
+    registered = {"genomes": 0, "samples": 0}
+    
+    # Scan reference genomes
+    reference_dir = "/datasets/reference_genome"
+    if os.path.exists(reference_dir):
+        for f in os.listdir(reference_dir):
+            if f.endswith('.fa') or f.endswith('.fasta'):
+                base_name = f.replace('.fa', '').replace('.fasta', '')
+                
+                # Check if already exists
+                existing = await db.get_reference_genome_by_name(base_name)
+                if not existing:
+                    file_path = os.path.join(reference_dir, f)
+                    gz_path = file_path + '.gz'
+                    fai_path = gz_path + '.fai'
+                    gzi_path = gz_path + '.gzi'
+                    sti_path = gz_path + '.r150.sti'
+                    
+                    # Determine species and build from name
+                    species = "Homo sapiens" if "hg" in base_name.lower() else "Unknown"
+                    build = base_name.upper() if "hg" in base_name.lower() else "Unknown"
+                    
+                    genome = await db.create_reference_genome(
+                        name=base_name,
+                        species=species,
+                        build=build,
+                        file_path=file_path
+                    )
+                    
+                    # Check if indexed
+                    if os.path.exists(gz_path) and os.path.exists(fai_path):
+                        await db.update_reference_genome_status(
+                            genome.id,
+                            "ready" if os.path.exists(sti_path) else "uploaded",
+                            gz_path=gz_path,
+                            fai_path=fai_path,
+                            gzi_path=gzi_path if os.path.exists(gzi_path) else None,
+                            sti_path=sti_path if os.path.exists(sti_path) else None
+                        )
+                    
+                    registered["genomes"] += 1
+    
+    # Scan samples
+    fastq_dir = "/datasets/fastq"
+    if os.path.exists(fastq_dir):
+        # Get ready genomes
+        genomes = await db.get_reference_genomes()
+        ready_genome = next((g for g in genomes if g.status == "ready"), None)
+        
+        if ready_genome:
+            # Group files by sample name
+            samples = {}
+            for f in os.listdir(fastq_dir):
+                if f.endswith('.fastq.gz'):
+                    sample_name = f.replace('_1.fastq.gz', '').replace('_2.fastq.gz', '').replace('.fastq.gz', '')
+                    if sample_name not in samples:
+                        samples[sample_name] = {}
+                    
+                    if '_1.' in f or f.startswith(sample_name + '_') and '1' in f.split('_')[-1]:
+                        samples[sample_name]['r1'] = os.path.join(fastq_dir, f)
+                    elif '_2.' in f or f.startswith(sample_name + '_') and '2' in f.split('_')[-1]:
+                        samples[sample_name]['r2'] = os.path.join(fastq_dir, f)
+            
+            for sample_name, paths in samples.items():
+                existing = await db.get_sample_by_name(sample_name)
+                if not existing and 'r1' in paths:
+                    sample_type = "paired-end" if 'r2' in paths else "single-end"
+                    sample = await db.create_sample(
+                        name=sample_name,
+                        sample_type=sample_type,
+                        reference_genome_id=ready_genome.id,
+                        r1_path=paths.get('r1'),
+                        r2_path=paths.get('r2')
+                    )
+                    registered["samples"] += 1
+    
+    return {
+        "message": "Data seeding complete",
+        "registered": registered
+    }
 
 
 # =======================

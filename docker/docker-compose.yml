@@ -15,6 +15,7 @@ services:
       - ../bio-pipeline:/pipeline
       - ../datasets:/datasets
       - datasets-logs:/datasets/logs
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - DATABASE_URL=postgresql://genomics:genomics@postgres:5432/genomics
       - NEO4J_URI=bolt://neo4j:7687
@@ -24,8 +25,9 @@ services:
       - MINIO_ACCESS_KEY=genomics
       - MINIO_SECRET_KEY=genomics
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - REFERENCE_GENOME_GZ=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz
-      - REFERENCE_GENOME=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplevel.fa
+      - REFERENCE_GENOME_GZ=/datasets/reference_genome/hg38.fa.gz
+      - REFERENCE_GENOME=/datasets/reference_genome/hg38.fa
+      - DOCKER_HOST=unix:///var/run/docker.sock
     depends_on:
       - postgres
       - neo4j
@@ -105,7 +107,8 @@ services:
       - datasets-bam:/datasets/bam
       - datasets-vcf:/datasets/vcf
       - datasets-annotations:/datasets/annotations
-      - reference-data:/reference
+      - reference-data:/datasets/reference_genome
+      - fastq-data:/datasets/fastq
     environment:
       - REFERENCE_GENOME_GZ=/datasets/reference_genome/hg38.fa.gz
       - REFERENCE_GENOME=/datasets/reference_genome/hg38.fa
@@ -151,6 +154,7 @@ volumes:
   postgres-data:
   minio-data:
   reference-data:
+  fastq-data:
   datasets-logs:
   datasets-bam:
   datasets-vcf:
