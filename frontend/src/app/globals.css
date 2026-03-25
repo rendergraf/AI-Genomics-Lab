@@ -9,3 +9,7 @@
   height: 0;
 }
 
+body {
+  @apply text-zinc-50;
+  @apply bg-gray-950
+}

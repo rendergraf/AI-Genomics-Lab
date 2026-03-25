@@ -27,3 +27,11 @@ export type { InputProps } from "./Input";
 // Alert
 export { Alert, AlertTitle, AlertDescription } from "./Alert";
 export type { AlertProps, AlertVariant, AlertTitleProps, AlertDescriptionProps } from "./Alert";
+
+// StatCard
+export { StatCard, statCardVariants } from "./StatCard";
+export type { StatCardProps, StatCardIconSize } from "./StatCard";
+
+// ButtonTab
+export { ButtonTab, buttonTabVariants } from "./ButtonTab";
+export type { ButtonTabProps, ButtonTabVariant, ButtonTabSize } from "./ButtonTab";

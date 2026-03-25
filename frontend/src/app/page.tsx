@@ -10,6 +10,8 @@ import {
 import GraphView from '@/components/GraphView'
 import VariantTable from '@/components/VariantTable'
 import GenomeBrowser from '@/components/GenomeBrowser'
+import { StatCard } from '@/components/ui'
+import { ButtonTab } from '@/components/ui/ButtonTab'
 import api from '@/lib/api'
 
 type TabType = 'dashboard' | 'variants' | 'knowledge' | 'analysis' | 'genome' | 'settings' | 'genomes' | 'samples'
@@ -119,18 +121,13 @@ export default function Home() {
               { id: 'genome', label: 'Genome Browser', icon: FolderOpen },
               { id: 'settings', label: 'Settings', icon: Settings },
             ].map((tab) => (
-              <button
+              <ButtonTab
                 key={tab.id}
+                icon={tab.icon}
+                label={tab.label}
+                isActive={activeTab === tab.id}
                 onClick={() => setActiveTab(tab.id as TabType)}
-                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
-                  activeTab === tab.id
-                    ? 'border-b-2 border-primary text-primary'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <tab.icon className="h-4 w-4" />
-                {tab.label}
-              </button>
+              />
             ))}
           </div>
         </div>
@@ -975,26 +972,6 @@ function SettingsContent() {
           {isSaving ? <><RefreshCw className="h-4 w-4 animate-spin" /> Saving...</> : <><Save className="h-4 w-4" /> Save Configuration</>}
         </button>
         {saveMessage && <span className="text-green-600 text-sm">{saveMessage}</span>}
-      </div>
-    </div>
-  )
-}
-
-// ==================== HELPER COMPONENTS ====================
-
-function StatCard({ icon: Icon, label, value, isLoading }: { icon: any, label: string, value: number, isLoading: boolean }) {
-  return (
-    <div className="p-6 bg-card rounded-lg border">
-      <div className="flex items-center gap-4">
-        <Icon className="h-8 w-8 text-primary" />
-        <div>
-          <p className="text-sm text-muted-foreground">{label}</p>
-          {isLoading ? (
-            <div className="h-8 w-20 bg-muted animate-pulse rounded" />
-          ) : (
-            <p className="text-2xl font-bold">{value.toLocaleString()}</p>
-          )}
-        </div>
       </div>
     </div>
   )
