@@ -111,10 +111,8 @@ if [ ! -f "$INPUT_FA" ]; then
     exit 1
 fi
 
-if [ ! -f "$FASTQ_SAMPLE" ]; then
-    echo "❌ Error: FASTQ sample file not found: $FASTQ_SAMPLE"
-    exit 1
-fi
+# Note: FASTQ_SAMPLE can contain multiple files separated by spaces
+# The validation below checks all files in the array
 
 # Validate all FASTQ files exist
 for f in "${FASTQ_FILES[@]}"; do

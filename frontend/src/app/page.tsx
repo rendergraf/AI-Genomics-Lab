@@ -45,7 +45,7 @@ interface DashboardStats {
 }
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<TabType>('genomes') // Start on genomes tab for managing reference genomes
+  const [activeTab, setActiveTab] = useState<TabType>('dashboard') // Start on dashboard with genome indexing
 
   const renderContent = () => {
     switch (activeTab) {
@@ -94,7 +94,7 @@ export default function Home() {
             <div className="flex items-center gap-3">
               <Dna className="h-8 w-8 text-primary" />
               <div>
-                <h1 className="text-xl font-bold">AI Genomics Lab</h1>
+                <h1 className="text-xl font-bold">AI Genomics Lab...</h1>
                 <p className="text-xs text-muted-foreground">Genomic Analysis Platform</p>
               </div>
             </div>
@@ -155,8 +155,41 @@ function DashboardContent({ onNavigate }: { onNavigate: (tab: TabType) => void }
   })
   const [services, setServices] = useState<ServiceStatus[]>([])
   const [isLoadingStats, setIsLoadingStats] = useState(true)
-  const [isDragging, setIsDragging] = useState(false)
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
+  
+  // Genome indexing state
+  const [referenceGenome, setReferenceGenome] = useState<File | null>(null)
+  const [fastqFiles, setFastqFiles] = useState<File[]>([])
+  const [isIndexing, setIsIndexing] = useState(false)
+  const [indexingProgress, setIndexingProgress] = useState<string[]>([])
+  const [showIndexingConsole, setShowIndexingConsole] = useState(false)
+  const [genomeName, setGenomeName] = useState('')
+  const [genomeSpecies, setGenomeSpecies] = useState('')
+  const [genomeBuild, setGenomeBuild] = useState('')
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadedGenomeId, setUploadedGenomeId] = useState<number | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  
+  // Fetch existing genomes on mount
+  useEffect(() => {
+    const fetchGenomes = async () => {
+      try {
+        const result = await api.getReferenceGenomes()
+        if (result.data?.genomes && result.data.genomes.length > 0) {
+          // Get the first uploaded genome that has status 'uploaded'
+          const uploadedGenome = result.data.genomes.find((g: any) => g.status === 'uploaded')
+          if (uploadedGenome) {
+            setUploadedGenomeId(uploadedGenome.id)
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching genomes:', error)
+      }
+    }
+    fetchGenomes()
+  }, [])
+
+  // FASTQ drag state
+  const [isFastqDragging, setIsFastqDragging] = useState(false)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -196,32 +229,88 @@ function DashboardContent({ onNavigate }: { onNavigate: (tab: TabType) => void }
     return () => clearInterval(interval)
   }, [])
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
+  const handleFastqDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-    setIsDragging(true)
+    setIsFastqDragging(true)
   }, [])
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
+  const handleFastqDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-    setIsDragging(false)
+    setIsFastqDragging(false)
   }, [])
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleFastqDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-    setIsDragging(false)
-    const files = Array.from(e.dataTransfer.files)
-    setUploadedFiles(prev => [...prev, ...files])
+    setIsFastqDragging(false)
+    const files = Array.from(e.dataTransfer.files).filter(f => 
+      f.name.endsWith('.fastq.gz') || f.name.endsWith('.fastq') || f.name.endsWith('.fq.gz') || f.name.endsWith('.fq')
+    )
+    setFastqFiles(prev => [...prev, ...files])
   }, [])
 
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFastqFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const files = Array.from(e.target.files)
-      setUploadedFiles(prev => [...prev, ...files])
+      const files = Array.from(e.target.files).filter(f => 
+        f.name.endsWith('.fastq.gz') || f.name.endsWith('.fastq') || f.name.endsWith('.fq.gz') || f.name.endsWith('.fq')
+      )
+      setFastqFiles(prev => [...prev, ...files])
     }
   }
 
-  const removeFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index))
+  const removeFastqFile = (index: number) => {
+    setFastqFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // Handle upload of reference genome FASTA
+  const handleGenomeUpload = async () => {
+    if (!referenceGenome || !genomeName || !genomeSpecies || !genomeBuild) return
+    
+    setIsUploading(true)
+    setUploadError(null)
+    try {
+      const result = await api.uploadReferenceGenome(genomeName, genomeSpecies, genomeBuild, referenceGenome)
+      // The API returns the genome object directly
+      if (result && result.id) {
+        setUploadedGenomeId(result.id)
+      }
+    } catch (error: any) {
+      setUploadError(error.message || 'Failed to upload genome')
+    }
+    setIsUploading(false)
+  }
+
+  // Handle index genome with FASTQ files
+  const handleIndexGenome = async () => {
+    if (!uploadedGenomeId || fastqFiles.length === 0) return
+    
+    setIsIndexing(true)
+    setShowIndexingConsole(true)
+    setIndexingProgress([])
+    
+    try {
+      const eventSource = await api.indexGenomeWithFastq(uploadedGenomeId, fastqFiles)
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.message) {
+            setIndexingProgress(prev => [...prev, data.message])
+          }
+          if (data.type === 'complete') {
+            setIsIndexing(false)
+          }
+        } catch (e) {
+          setIndexingProgress(prev => [...prev, event.data])
+        }
+      }
+      
+      eventSource.onerror = () => {
+        setIsIndexing(false)
+      }
+    } catch (error: any) {
+      setIndexingProgress(prev => [...prev, `Error: ${error.message}`])
+      setIsIndexing(false)
+    }
   }
 
   const getServiceIcon = (status: ServiceStatus['status']) => {
@@ -242,76 +331,155 @@ function DashboardContent({ onNavigate }: { onNavigate: (tab: TabType) => void }
         <StatCard icon={Activity} label="Mutations" value={stats.mutations} isLoading={isLoadingStats} />
       </div>
 
-      {/* Main Content */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2">
-          <div className="p-6 bg-card rounded-lg border">
-            <h2 className="text-xl font-semibold mb-4">Upload Genome Data</h2>
+      {/* Reference Genomes Section */}
+      <div className="p-6 bg-card rounded-lg border">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold">Reference Genomes</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Upload Reference Genome (FASTA) */}
+          <div>
+            <h3 className="text-lg font-medium mb-3">Upload Genome</h3>
+            <p className="text-sm text-muted-foreground mb-4">Upload reference genome FASTA file (e.g., hg38.fa)</p>
+            <div className="space-y-3">
+              <input
+                type="text"
+                value={genomeName}
+                onChange={(e) => setGenomeName(e.target.value)}
+                placeholder="Name (e.g., hg38)"
+                className="w-full px-3 py-2 rounded-md border bg-background"
+              />
+              <input
+                type="text"
+                value={genomeSpecies}
+                onChange={(e) => setGenomeSpecies(e.target.value)}
+                placeholder="Species (e.g., Homo sapiens)"
+                className="w-full px-3 py-2 rounded-md border bg-background"
+              />
+              <input
+                type="text"
+                value={genomeBuild}
+                onChange={(e) => setGenomeBuild(e.target.value)}
+                placeholder="Build (e.g., GRCh38)"
+                className="w-full px-3 py-2 rounded-md border bg-background"
+              />
+              <div className="border-2 border-dashed rounded-lg p-4 text-center">
+                <input
+                  type="file"
+                  accept=".fa,.fasta,.fa.gz,.fasta.gz"
+                  onChange={(e) => setReferenceGenome(e.target.files?.[0] || null)}
+                  className="hidden"
+                  id="genome-upload"
+                />
+                <label htmlFor="genome-upload" className="cursor-pointer">
+                  <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                  <p className="text-sm">{referenceGenome ? referenceGenome.name : 'Click to upload FASTA file'}</p>
+                  <p className="text-xs text-muted-foreground">{referenceGenome ? `${(referenceGenome.size / 1024 / 1024).toFixed(2)} MB` : 'Supported: .fa, .fasta'}</p>
+                </label>
+              </div>
+              <button
+                onClick={handleGenomeUpload}
+                disabled={isUploading || !referenceGenome || !genomeName || !genomeSpecies || !genomeBuild}
+                className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md disabled:opacity-50"
+              >
+                {isUploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {isUploading ? 'Uploading...' : 'Upload Genome'}
+              </button>
+              {uploadError && <p className="text-sm text-red-500">{uploadError}</p>}
+              {uploadedGenomeId && (
+                <p className="text-sm text-green-600 flex items-center gap-1">
+                  <CheckCircle className="h-4 w-4" /> Genome uploaded successfully!
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Upload Genome Data (FASTQ) */}
+          <div>
+            <h3 className="text-lg font-medium mb-3">Upload Genome Data</h3>
+            <p className="text-sm text-muted-foreground mb-4">Drop FASTQ files here for indexing</p>
             <div 
               className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                isDragging ? 'border-primary bg-primary/5' : 'border-gray-300 hover:border-gray-400'
+                isFastqDragging ? 'border-primary bg-primary/5' : 'border-gray-300 hover:border-gray-400'
               }`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
+              onDragOver={handleFastqDragOver}
+              onDragLeave={handleFastqDragLeave}
+              onDrop={handleFastqDrop}
             >
               <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <p className="text-lg font-medium mb-2">Drop genome files here</p>
-              <p className="text-sm text-muted-foreground mb-4">Supported formats: FASTQ, FASTA, BAM, VCF</p>
+              <p className="text-sm text-muted-foreground mb-4">Supported formats: FASTQ, FASTA</p>
               <label className="bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90 cursor-pointer inline-block">
                 Browse Files
-                <input type="file" multiple accept=".fastq,.fasta,.fa,.bam,.vcf,.vcf.gz" onChange={handleFileInput} className="hidden" />
+                <input type="file" multiple accept=".fastq,.fastq.gz,.fq,.fq.gz" onChange={handleFastqFileInput} className="hidden" />
               </label>
             </div>
 
-            {uploadedFiles.length > 0 && (
+            {fastqFiles.length > 0 && (
               <div className="mt-4 space-y-2">
-                <h3 className="text-sm font-medium">Selected Files ({uploadedFiles.length})</h3>
-                {uploadedFiles.map((file, index) => (
+                <h4 className="text-sm font-medium">Selected Files ({fastqFiles.length})</h4>
+                {fastqFiles.map((file, index) => (
                   <div key={index} className="flex items-center justify-between p-3 bg-muted rounded-md">
                     <div className="flex items-center gap-3">
                       <FileText className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm">{file.name}</span>
                       <span className="text-xs text-muted-foreground">({(file.size / 1024 / 1024).toFixed(2)} MB)</span>
                     </div>
-                    <button onClick={() => removeFile(index)} className="p-1 hover:bg-destructive/10 rounded">
+                    <button onClick={() => removeFastqFile(index)} className="p-1 hover:bg-destructive/10 rounded">
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </button>
                   </div>
                 ))}
-                <div className="flex gap-2 mt-4">
-                  <button onClick={() => onNavigate('analysis')} className="flex-1 flex items-center justify-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90">
-                    <Play className="h-4 w-4" /> Start Analysis
-                  </button>
-                  <button onClick={() => setUploadedFiles([])} className="px-4 py-2 rounded-md border hover:bg-accent">Clear All</button>
-                </div>
               </div>
             )}
           </div>
         </div>
 
-        <div>
-          <div className="p-6 bg-card rounded-lg border">
-            <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
-            <div className="space-y-3">
-              <button onClick={() => onNavigate('analysis')} className="w-full flex items-center gap-3 p-3 rounded-md border hover:bg-accent transition-colors">
-                <Beaker className="h-5 w-5 text-primary" /><span>New Analysis</span><ChevronRight className="h-4 w-4 ml-auto" />
-              </button>
-              <button onClick={() => onNavigate('knowledge')} className="w-full flex items-center gap-3 p-3 rounded-md border hover:bg-accent transition-colors">
-                <Network className="h-5 w-5 text-primary" /><span>Explore Genes</span><ChevronRight className="h-4 w-4 ml-auto" />
-              </button>
-              <button onClick={() => onNavigate('variants')} className="w-full flex items-center gap-3 p-3 rounded-md border hover:bg-accent transition-colors">
-                <Dna className="h-5 w-5 text-primary" /><span>View Mutations</span><ChevronRight className="h-4 w-4 ml-auto" />
-              </button>
-              <button onClick={() => onNavigate('genome')} className="w-full flex items-center gap-3 p-3 rounded-md border hover:bg-accent transition-colors">
-                <FolderOpen className="h-5 w-5 text-primary" /><span>Genome Browser</span><ChevronRight className="h-4 w-4 ml-auto" />
-              </button>
-            </div>
-          </div>
+        {/* Index Genome Button */}
+        <div className="mt-6 pt-6 border-t">
+          <button
+            onClick={handleIndexGenome}
+            disabled={isIndexing || !uploadedGenomeId || fastqFiles.length === 0}
+            className={`flex items-center gap-2 px-6 py-3 rounded-md text-white disabled:opacity-50 ${
+              uploadedGenomeId && fastqFiles.length > 0 ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400'
+            }`}
+          >
+            {isIndexing ? (
+              <><RefreshCw className="h-5 w-5 animate-spin" /> Indexing...</>
+            ) : (
+              <><Play className="h-5 w-5" /> Index Genome</>
+            )}
+          </button>
+          <p className="text-sm text-muted-foreground mt-2">
+            {!uploadedGenomeId ? 'Upload a reference genome first' : 
+             fastqFiles.length === 0 ? 'Upload FASTQ files to enable indexing' : 
+             'Ready to index genome with FASTQ data'}
+          </p>
         </div>
       </div>
 
-      {/* Services Status */}
+      {/* Indexing Progress Console */}
+      {showIndexingConsole && (
+        <div className="p-6 bg-card rounded-lg border">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Indexing Progress</h3>
+            <button onClick={() => setShowIndexingConsole(false)} className="p-1 hover:bg-accent rounded">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="bg-black text-green-400 font-mono text-sm p-4 rounded-lg h-64 overflow-y-auto">
+            {indexingProgress.length === 0 ? (
+              <span className="text-gray-500">Indexing progress will appear here...</span>
+            ) : (
+              indexingProgress.map((line, i) => (
+                <div key={i}>{line}</div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Main Content - Quick Actions */}
       <div className="p-6 bg-card rounded-lg border">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">Services Status</h2>

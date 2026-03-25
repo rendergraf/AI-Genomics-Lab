@@ -89,6 +89,9 @@ echo "Output: $OUTPUT_DIR"
 echo "VCF Output: $VCF_OUTPUT_DIR"
 echo "Threads: $THREADS"
 echo "Test Mode: $TEST_MODE"
+if [ "$TEST_MODE" = "true" ] && [ "$READ_LIMIT" -gt 0 ]; then
+    echo "⚡ Running in TEST_MODE: only $READ_LIMIT reads per sample"
+fi
 echo "Parallel: $PARALLEL"
 echo "Use CRAM: $USE_CRAM"
 echo "Preload RAM: $PRELOAD_RAM"
@@ -96,68 +99,106 @@ echo "=========================================="
 
 # Record overall start time
 PIPELINE_START_TIME=$(date +%s)
-log_step "0" "Pipeline initialization complete"
+log_step "0" "Pipeline initialization complete - verifying indices"
 
 # Create output directories
 mkdir -p "$OUTPUT_DIR" "$VCF_OUTPUT_DIR" "$LOGS_DIR"
 
-# Check if compressed reference genome exists (BGZF format)
+# ============================================
+# STEP 0: VERIFY GENOME INDICES (Created by index_genome.sh)
+# ============================================
+
+# Check if compressed reference genome exists
 if [ ! -f "${REFERENCE_GENOME_GZ}" ]; then
-    echo "⚠️ Compressed reference genome not found at $REFERENCE_GENOME_GZ"
-    echo "Please place Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz in /datasets/reference_genome/"
-    echo "Then run: bgzip -@ 8 Homo_sapiens.GRCh38.dna_sm.toplevel.fa"
-    echo "And: samtools faidx Homo_sapiens.GRCh38.dna_sm.toplevel.fa.gz"
+    echo "❌ ERROR: Reference genome not found at $REFERENCE_GENOME_GZ"
+    echo "Please run index_genome.sh first to create the reference genome."
     exit 1
 fi
 
-# Log reference genome info
-log_step "1" "Reference genome validation"
+# Verify all required indices exist (created by index_genome.sh)
+INDEX_ERRORS=0
+
+echo "[$(timestamp)] 🔍 Verifying genome indices..."
+
+# Check .fa.gz (BGZF compressed reference)
+if [ ! -f "${REFERENCE_GENOME_GZ}" ]; then
+    echo "❌ ERROR: ${REFERENCE_GENOME_GZ} (BGZF reference) - NOT FOUND"
+    INDEX_ERRORS=$((INDEX_ERRORS + 1))
+else
+    echo "✅ ${REFERENCE_GENOME_GZ} exists"
+fi
+
+# Check .fai (SAMtools index)
+if [ ! -f "${REFERENCE_GENOME_GZ}.fai" ]; then
+    echo "❌ ERROR: ${REFERENCE_GENOME_GZ}.fai (SAMtools index) - NOT FOUND"
+    INDEX_ERRORS=$((INDEX_ERRORS + 1))
+else
+    echo "✅ ${REFERENCE_GENOME_GZ}.fai exists"
+fi
+
+# Check .gzi (BGZF index - required for CRAM)
+if [ ! -f "${REFERENCE_GENOME_GZ}.gzi" ]; then
+    echo "❌ ERROR: ${REFERENCE_GENOME_GZ}.gzi (BGZF index) - NOT FOUND"
+    INDEX_ERRORS=$((INDEX_ERRORS + 1))
+else
+    echo "✅ ${REFERENCE_GENOME_GZ}.gzi exists"
+fi
+
+# Check .sti (strobealign index)
+if [ ! -f "${REFERENCE_GENOME_GZ}.r150.sti" ]; then
+    echo "❌ ERROR: ${REFERENCE_GENOME_GZ}.r150.sti (strobealign index) - NOT FOUND"
+    INDEX_ERRORS=$((INDEX_ERRORS + 1))
+else
+    echo "✅ ${REFERENCE_GENOME_GZ}.sti exists"
+fi
+
+# If any index is missing, exit with error
+if [ $INDEX_ERRORS -gt 0 ]; then
+    echo ""
+    echo "=========================================="
+    echo "❌ ERROR: Missing $INDEX_ERRORS required index file(s)"
+    echo "=========================================="
+    echo "Please run index_genome.sh first to create all required indices:"
+    echo ""
+    echo "  1. ${REFERENCE_GENOME_GZ}       (BGZF compressed genome)"
+    echo "  2. ${REFERENCE_GENOME_GZ}.fai   (SAMtools index)"
+    echo "  3. ${REFERENCE_GENOME_GZ}.gzi   (BGZF index)"
+    echo "  4. ${REFERENCE_GENOME_GZ}.sti  (strobealign index)"
+    echo ""
+    echo "Expected location: $(dirname $REFERENCE_GENOME_GZ)"
+    exit 1
+fi
+
+echo "✅ All genome indices verified successfully!"
+log_step "1" "Genome indices validation complete"
 log_file "$REFERENCE_GENOME_GZ"
+
+# ============================================
+# STEP 1: PREPARE INPUT SAMPLES
+# ============================================
+
+# Set reference genome path (used throughout pipeline)
+# REFERENCE_GENOME is used internally, REFERENCE_GENOME_GZ is the env var
 
 # Check if input files exist (support both .fastq and .fastq.gz)
 if [ ! "$(ls -A $INPUT_DIR 2>/dev/null)" ]; then
-    echo "⚠️ No input files found in $INPUT_DIR"
+    echo "❌ ERROR: No input files found in $INPUT_DIR"
     echo "Please place FASTQ files in /datasets/fastq/"
     exit 1
 fi
 
-# ============================================
-# OPTIMIZATION 1: BGZF compressed reference (NO gunzip)
-# ============================================
-REFERENCE_GENOME="$REFERENCE_GENOME_GZ"
+echo "[$(timestamp)] 📂 Found input files in $INPUT_DIR"
+ls -lh "$INPUT_DIR"/*.fastq.gz 2>/dev/null | head -5 || true
+ls -lh "$INPUT_DIR"/*.fastq 2>/dev/null | head -5 || true
 
-# Check for BGZF index (.gzi file)
-if [ ! -f "${REFERENCE_GENOME}.gzi" ]; then
-    echo "⚠️ BGZF index not found. Converting gzip to BGZF..."
-    # Extract, recompress with bgzip
-    TEMP_FA=$(mktemp /tmp/reference_XXXXXX.fa)
-    gunzip -c "$REFERENCE_GENOME" > "$TEMP_FA"
-    bgzip -@ "$THREADS" -c "$TEMP_FA" > "${REFERENCE_GENOME}.bgzf"
-    mv "${REFERENCE_GENOME}.bgzf" "$REFERENCE_GENOME"
-    rm "$TEMP_FA"
-    echo "✅ Converted to BGZF format"
-fi
-
-# Index compressed reference with SAMtools (once)
-if [ ! -f "${REFERENCE_GENOME}.fai" ]; then
-    echo "📇 Indexing BGZF reference genome with SAMtools..."
-    samtools faidx "$REFERENCE_GENOME"
-    echo "✅ SAMtools index created"
-fi
-
-# Index compressed reference with strobealign (creates .sti file)
-if [ ! -f "${REFERENCE_GENOME}.sti" ]; then
-    echo "📇 Indexing BGZF reference genome with strobealign..."
-    strobealign --index "$REFERENCE_GENOME"
-    echo "✅ strobealign index created"
-fi
+log_step "2" "Input samples validation complete"
 
 # ============================================
 # OPTIMIZATION 5: Preload reference in RAM
 # ============================================
 if [ "$PRELOAD_RAM" = "true" ] && command -v vmtouch &> /dev/null; then
     echo "📦 Preloading reference genome in RAM..."
-    vmtouch -t "$REFERENCE_GENOME"
+    vmtouch -t "$REFERENCE_GENOME_GZ"
     echo "✅ Reference preloaded in page cache"
 elif [ "$PRELOAD_RAM" = "true" ]; then
     echo "⚠️ vmtouch not installed, skipping RAM preload"
@@ -172,7 +213,7 @@ process_sample() {
     local vcf_output_dir="$VCF_OUTPUT_DIR"
     local logs_dir="$LOGS_DIR"
     local threads="$THREADS"
-    local reference_genome="$REFERENCE_GENOME"
+    local reference_genome="$REFERENCE_GENOME_GZ"
     local test_mode="$TEST_MODE"
     local read_limit="$READ_LIMIT"
     local annotation_dir="$ANNOTATION_DIR"
@@ -249,8 +290,8 @@ process_sample() {
     
     # Track step timing
     local alignment_start=$(date +%s)
-    log_step "2" "Starting alignment for $basename"
-    log_progress 20 100
+    log_step "3" "Starting alignment for $basename"
+    log_progress 30 100
     
     if [ -f "$r1" ] && [ -f "$r2" ]; then
         # Paired-end alignment with streaming (no samtools view)
@@ -285,9 +326,9 @@ process_sample() {
     # Log alignment timing and file size
     local alignment_end=$(date +%s)
     local alignment_duration=$((alignment_end - alignment_start))
-    log_step "2" "Alignment complete for $basename (${alignment_duration}s)"
+    log_step "3" "Alignment complete for $basename (${alignment_duration}s)"
     log_file "$sorted_bam"
-    log_progress 50 100
+    log_progress 60 100
     
     # ============================================
     # OPTIMIZATION 3: Convert BAM to CRAM (30-60% less space)
@@ -305,7 +346,7 @@ process_sample() {
         output_file="$sorted_cram"
         local cram_end=$(date +%s)
         local cram_duration=$((cram_end - cram_start))
-        log_step "3" "CRAM conversion complete (${cram_duration}s)"
+        log_step "4" "CRAM conversion complete (${cram_duration}s)"
         log_file "$sorted_cram"
     fi
     
@@ -315,8 +356,8 @@ process_sample() {
     samtools index "$output_file" 2> "$logs_dir/${basename}_samtools_index.log"
     local index_end=$(date +%s)
     local index_duration=$((index_end - index_start))
-    log_step "4" "Indexing complete (${index_duration}s)"
-    log_progress 60 100
+    log_step "5" "Indexing complete (${index_duration}s)"
+    log_progress 70 100
     
     # ============================================
     # OPTIMIZATION 4: mpileup with multithreading real
@@ -337,9 +378,9 @@ process_sample() {
     
     local variant_end=$(date +%s)
     local variant_duration=$((variant_end - variant_start))
-    log_step "5" "Variant calling complete (${variant_duration}s)"
+    log_step "6" "Variant calling complete (${variant_duration}s)"
     log_file "$vcf_output_dir/${basename}_variants.vcf"
-    log_progress 80 100
+    log_progress 90 100
     
     # Step 4: Filter variants
     local filter_start=$(date +%s)
@@ -349,9 +390,9 @@ process_sample() {
     
     local filter_end=$(date +%s)
     local filter_duration=$((filter_end - filter_start))
-    log_step "6" "Variant filtering complete (${filter_duration}s)"
+    log_step "7" "Variant filtering complete (${filter_duration}s)"
     log_file "$vcf_output_dir/${basename}_filtered.vcf"
-    log_progress 90 100
+    log_progress 95 100
     
     # Step 5: Annotate with ClinVar if available
     local annotate_start=$(date +%s)
@@ -363,7 +404,7 @@ process_sample() {
             "$vcf_output_dir/${basename}_filtered.vcf" 2> "$logs_dir/${basename}_bcftools_annotate.log"
         local annotate_end=$(date +%s)
         local annotate_duration=$((annotate_end - annotate_start))
-        log_step "7" "ClinVar annotation complete (${annotate_duration}s)"
+        log_step "8" "ClinVar annotation complete (${annotate_duration}s)"
         log_file "$vcf_output_dir/${basename}_annotated.vcf"
     fi
     

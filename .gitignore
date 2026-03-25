@@ -136,3 +136,6 @@ service-account.json
 # ============================================
 site/
 docs/_build/
+
+*storybook.log
+storybook-static

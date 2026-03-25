@@ -14,7 +14,7 @@ import re
 import subprocess
 import time
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
@@ -474,9 +474,9 @@ async def list_reference_genomes():
 
 @app.post("/reference-genomes", tags=["Reference Genomes"], summary="Upload reference genome")
 async def upload_reference_genome(
-    name: str,
-    species: str,
-    build: str,
+    name: str = Form(...),
+    species: str = Form(...),
+    build: str = Form(...),
     file: UploadFile = File(...)
 ):
     """
@@ -623,6 +623,228 @@ async def delete_reference_genome(genome_id: int):
     await db.delete_reference_genome(genome_id)
     
     return {"message": "Reference genome deleted"}
+
+
+@app.post("/reference-genomes/index-with-fastq", tags=["Reference Genomes"], summary="Index genome with FASTQ files")
+async def index_genome_with_fastq(
+    genome_id: int = Form(...),
+    fastq_files: list[UploadFile] = File(...)
+):
+    """
+    Index a reference genome using provided FASTQ files for STI index creation.
+    """
+    db = get_database_service()
+    genome = await db.get_reference_genome(genome_id)
+    
+    if not genome:
+        raise HTTPException(status_code=404, detail="Reference genome not found")
+    
+    # Update status to indexing
+    await db.update_reference_genome_status(genome_id, "indexing")
+    
+    # Save uploaded FASTQ files temporarily
+    fastq_dir = "/datasets/fastq"
+    os.makedirs(fastq_dir, exist_ok=True)
+    
+    fastq_paths = []
+    for f in fastq_files:
+        file_path = os.path.join(fastq_dir, f.filename)
+        content = await f.read()
+        with open(file_path, "wb") as fp:
+            fp.write(content)
+        fastq_paths.append(file_path)
+    
+    async def generate_indexing_logs():
+        import json
+        
+        env = os.environ.copy()
+        env["INPUT_FA"] = genome.file_path
+        env["FASTQ_SAMPLE"] = " ".join(fastq_paths)
+        
+        cmd = [
+            "docker", "exec", "-i", "ai-genomics-bio",
+            "/bin/bash", "-c",
+            f"INPUT_FA={genome.file_path} FASTQ_SAMPLE=\"{' '.join(fastq_paths)}\" bash /pipeline/scripts/index_genome.sh 2>&1"
+        ]
+        
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                text=True,
+                bufsize=1
+            )
+            
+            gz_path = f"{genome.file_path}.gz"
+            fai_path = f"{genome.file_path}.gz.fai"
+            gzi_path = f"{genome.file_path}.gz.gzi"
+            sti_path = f"{genome.file_path}.gz.r150.sti"
+            
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    msg = line.strip()
+                    yield f"data: {json.dumps({'type': 'log', 'message': msg})}\n\n"
+                    
+                    if "GZ_PATH=" in line:
+                        gz_path = line.split("=")[1].strip()
+                    elif "FAI_PATH=" in line:
+                        fai_path = line.split("=")[1].strip()
+                    elif "GZI_PATH=" in line:
+                        gzi_path = line.split("=")[1].strip()
+                    elif "STI_PATH=" in line:
+                        sti_path = line.split("=")[1].strip()
+            
+            process.stdout.close()
+            return_code = process.wait()
+            
+            if return_code == 0:
+                await db.update_reference_genome_status(
+                    genome_id,
+                    "ready",
+                    gz_path=gz_path,
+                    fai_path=fai_path,
+                    gzi_path=gzi_path,
+                    sti_path=sti_path
+                )
+                yield f"data: {json.dumps({'type': 'complete', 'message': 'Genome indexing with FASTQ complete!'})}\n\n"
+            else:
+                await db.update_reference_genome_status(genome_id, "error")
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Genome indexing failed'})}\n\n"
+                
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            for path in fastq_paths:
+                if os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except:
+                        pass
+    
+    return StreamingResponse(generate_indexing_logs(), media_type="text/event-stream")
+
+
+@app.post("/reference-genomes/upload-fastq", tags=["Reference Genomes"], summary="Upload FASTQ files for indexing")
+async def upload_fastq_files(files: list[UploadFile] = File(...)):
+    """
+    Upload FASTQ files and return their paths on the server.
+    Files are saved to /datasets/fastq which is shared with bio-pipeline container.
+    """
+    # Use /tmp first, then copy to shared volume
+    temp_dir = "/tmp/fastq_upload"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    fastq_paths = []
+    for f in files:
+        file_path = os.path.join(temp_dir, f.filename)
+        content = await f.read()
+        with open(file_path, "wb") as fp:
+            fp.write(content)
+        fastq_paths.append(file_path)
+    
+    # Copy to shared directory accessible by bio-pipeline container
+    shared_fastq_dir = "/datasets/fastq"
+    os.makedirs(shared_fastq_dir, exist_ok=True)
+    
+    for src_path in fastq_paths:
+        filename = os.path.basename(src_path)
+        dst_path = os.path.join(shared_fastq_dir, filename)
+        # Copy file to shared directory
+        import shutil
+        shutil.copy2(src_path, dst_path)
+        # Change permissions to allow access from other containers
+        os.chmod(dst_path, 0o777)
+        # Update path to shared location
+        fastq_paths[fastq_paths.index(src_path)] = dst_path
+    
+    return {
+        "paths": fastq_paths,
+        "message": f"Uploaded {len(fastq_paths)} FASTQ files"
+    }
+
+
+@app.get("/reference-genomes/{genome_id}/index-with-paths", tags=["Reference Genomes"], summary="Index genome with FASTQ file paths")
+async def index_genome_with_paths(genome_id: int, paths: str):
+    """
+    Index a reference genome using provided FASTQ file paths.
+    """
+    import json
+    
+    db = get_database_service()
+    genome = await db.get_reference_genome(genome_id)
+    
+    if not genome:
+        raise HTTPException(status_code=404, detail="Reference genome not found")
+    
+    # Update status to indexing
+    await db.update_reference_genome_status(genome_id, "indexing")
+    
+    # Parse the paths
+    fastq_paths = paths.split(",")
+    
+    async def generate_indexing_logs():
+        env = os.environ.copy()
+        env["INPUT_FA"] = genome.file_path
+        env["FASTQ_SAMPLE"] = " ".join(fastq_paths)
+        
+        cmd = [
+            "docker", "exec", "-i", "ai-genomics-bio",
+            "/bin/bash", "-c",
+            f"INPUT_FA={genome.file_path} FASTQ_SAMPLE=\"{' '.join(fastq_paths)}\" bash /pipeline/scripts/index_genome.sh 2>&1"
+        ]
+        
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                text=True,
+                bufsize=1
+            )
+            
+            gz_path = f"{genome.file_path}.gz"
+            fai_path = f"{genome.file_path}.gz.fai"
+            gzi_path = f"{genome.file_path}.gz.gzi"
+            sti_path = f"{genome.file_path}.gz.r150.sti"
+            
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    msg = line.strip()
+                    yield f"data: {json.dumps({'type': 'log', 'message': msg})}\n\n"
+                    
+                    if "GZ_PATH=" in line:
+                        gz_path = line.split("=")[1].strip()
+                    elif "FAI_PATH=" in line:
+                        fai_path = line.split("=")[1].strip()
+                    elif "GZI_PATH=" in line:
+                        gzi_path = line.split("=")[1].strip()
+                    elif "STI_PATH=" in line:
+                        sti_path = line.split("=")[1].strip()
+            
+            process.stdout.close()
+            return_code = process.wait()
+            
+            if return_code == 0:
+                await db.update_reference_genome_status(
+                    genome_id,
+                    "ready",
+                    gz_path=gz_path,
+                    fai_path=fai_path,
+                    gzi_path=gzi_path,
+                    sti_path=sti_path
+                )
+                yield f"data: {json.dumps({'type': 'complete', 'message': 'Genome indexing with FASTQ complete!'})}\n\n"
+            else:
+                await db.update_reference_genome_status(genome_id, "error")
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Genome indexing failed'})}\n\n"
+                
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(generate_indexing_logs(), media_type="text/event-stream")
 
 
 # =======================
