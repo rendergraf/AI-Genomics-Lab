@@ -35,12 +35,12 @@ export type ButtonTabSize = "sm" | "default" | "lg";
  * Class Variance Authority (CVA) configuration for ButtonTab styles.
  */
 export const buttonTabVariants = cva(
-  "flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap",
+  "flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap",
   {
     variants: {
       variant: {
-        default: "text-muted-foreground hover:text-foreground",
-        active: "border-b-2 border-primary text-primary",
+        default: "bg-zinc-700 text-muted-foreground hover:text-foreground",
+        active: "bg-zinc-600 border-b-2 border-gray-500 text-primary",
       },
       size: {
         sm: "px-3 py-2 text-xs",

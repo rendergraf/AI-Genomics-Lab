@@ -165,7 +165,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         />
 
         {/* Text */}
-        <span className={cn("relative z-10", textLayerClass)}>
+        <span className={cn("relative flex gap-2 z-10", textLayerClass)}>
           {loading && loadingText ? loadingText : children}
         </span>
 

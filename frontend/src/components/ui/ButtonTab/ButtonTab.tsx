@@ -66,6 +66,10 @@ const ButtonTab = React.forwardRef<HTMLButtonElement, ButtonTabProps>(
           buttonTabVariants({ variant, size, className })
         )}
         {...props}
+        style={{
+            clipPath: 'polygon(0 30%, 10% 0, 100% 0, 100% 100%, 0 100%)',
+            width: '100%',
+          }}
       >
         {Icon && <Icon className="h-4 w-4" />}
         {label}

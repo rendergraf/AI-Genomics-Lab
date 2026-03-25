@@ -11,6 +11,7 @@ import GraphView from '@/components/GraphView'
 import VariantTable from '@/components/VariantTable'
 import GenomeBrowser from '@/components/GenomeBrowser'
 import { StatCard } from '@/components/ui'
+import { Button } from '@/components/ui/Button'
 import { ButtonTab } from '@/components/ui/ButtonTab'
 import api from '@/lib/api'
 
@@ -90,7 +91,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b bg-card">
+      <header className="bg-card">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -108,7 +109,7 @@ export default function Home() {
       </header>
 
       {/* Navigation */}
-      <nav className="border-b bg-card">
+      <nav className="border-b border-gray-500 bg-card">
         <div className="container mx-auto px-4">
           <div className="flex gap-1 overflow-x-auto">
             {[
@@ -434,19 +435,18 @@ function DashboardContent({ onNavigate }: { onNavigate: (tab: TabType) => void }
 
         {/* Index Genome Button */}
         <div className="mt-6 pt-6 border-t">
-          <button
+          <Button
+            colorScheme="success"
+            variant="solid"
+            size="lg"
+            loading={isIndexing}
+            loadingText="Indexing..."
+            disabled={!uploadedGenomeId || fastqFiles.length === 0}
             onClick={handleIndexGenome}
-            disabled={isIndexing || !uploadedGenomeId || fastqFiles.length === 0}
-            className={`flex items-center gap-2 px-6 py-3 rounded-md text-white disabled:opacity-50 ${
-              uploadedGenomeId && fastqFiles.length > 0 ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400'
-            }`}
           >
-            {isIndexing ? (
-              <><RefreshCw className="h-5 w-5 animate-spin" /> Indexing...</>
-            ) : (
-              <><Play className="h-5 w-5" /> Index Genome</>
-            )}
-          </button>
+            <Play className="h-5 w-5" />
+            Index Genome
+          </Button>
           <p className="text-sm text-muted-foreground mt-2">
             {!uploadedGenomeId ? 'Upload a reference genome first' : 
              fastqFiles.length === 0 ? 'Upload FASTQ files to enable indexing' : 
