@@ -10,10 +10,11 @@ import {
 import GraphView from '@/components/GraphView'
 import VariantTable from '@/components/VariantTable'
 import GenomeBrowser from '@/components/GenomeBrowser'
-import { StatCard } from '@/components/ui'
+import { Input, StatCard } from '@/components/ui'
 import { Button } from '@/components/ui/Button'
 import { ButtonTab } from '@/components/ui/ButtonTab'
 import api from '@/lib/api'
+import { Area } from '@/components/ui/Area'
 
 type TabType = 'dashboard' | 'variants' | 'knowledge' | 'analysis' | 'genome' | 'settings' | 'genomes' | 'samples'
 
@@ -330,7 +331,7 @@ function DashboardContent({ onNavigate }: { onNavigate: (tab: TabType) => void }
       </div>
 
       {/* Reference Genomes Section */}
-      <div className="p-6 bg-card rounded-lg border">
+      <Area>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">Reference Genomes</h2>
         </div>
@@ -340,29 +341,26 @@ function DashboardContent({ onNavigate }: { onNavigate: (tab: TabType) => void }
             <h3 className="text-lg font-medium mb-3">Upload Genome</h3>
             <p className="text-sm text-muted-foreground mb-4">Upload reference genome FASTA file (e.g., hg38.fa)</p>
             <div className="space-y-3">
-              <input
+              <Input
                 type="text"
                 value={genomeName}
                 onChange={(e) => setGenomeName(e.target.value)}
                 placeholder="Name (e.g., hg38)"
-                className="w-full px-3 py-2 rounded-md border bg-background"
               />
-              <input
+              <Input
                 type="text"
                 value={genomeSpecies}
                 onChange={(e) => setGenomeSpecies(e.target.value)}
                 placeholder="Species (e.g., Homo sapiens)"
-                className="w-full px-3 py-2 rounded-md border bg-background"
               />
-              <input
+              <Input
                 type="text"
                 value={genomeBuild}
                 onChange={(e) => setGenomeBuild(e.target.value)}
                 placeholder="Build (e.g., GRCh38)"
-                className="w-full px-3 py-2 rounded-md border bg-background"
               />
               <div className="border-2 border-dashed rounded-lg p-4 text-center">
-                <input
+                <Input
                   type="file"
                   accept=".fa,.fasta,.fa.gz,.fasta.gz"
                   onChange={(e) => setReferenceGenome(e.target.files?.[0] || null)}
@@ -409,7 +407,7 @@ function DashboardContent({ onNavigate }: { onNavigate: (tab: TabType) => void }
               <p className="text-sm text-muted-foreground mb-4">Supported formats: FASTQ, FASTA</p>
               <label className="bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90 cursor-pointer inline-block">
                 Browse Files
-                <input type="file" multiple accept=".fastq,.fastq.gz,.fq,.fq.gz" onChange={handleFastqFileInput} className="hidden" />
+                <Input type="file" multiple accept=".fastq,.fastq.gz,.fq,.fq.gz" onChange={handleFastqFileInput} className="hidden" />
               </label>
             </div>
 
@@ -453,11 +451,11 @@ function DashboardContent({ onNavigate }: { onNavigate: (tab: TabType) => void }
              'Ready to index genome with FASTQ data'}
           </p>
         </div>
-      </div>
+      </Area>
 
       {/* Indexing Progress Console */}
       {showIndexingConsole && (
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold">Indexing Progress</h3>
             <button onClick={() => setShowIndexingConsole(false)} className="p-1 hover:bg-accent rounded">
@@ -473,11 +471,11 @@ function DashboardContent({ onNavigate }: { onNavigate: (tab: TabType) => void }
               ))
             )}
           </div>
-        </div>
+        </Area>
       )}
 
       {/* Main Content - Quick Actions */}
-      <div className="p-6 bg-card rounded-lg border">
+      <Area>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">Services Status</h2>
           <button onClick={() => window.location.reload()} className="p-2 hover:bg-accent rounded-md">
@@ -502,7 +500,7 @@ function DashboardContent({ onNavigate }: { onNavigate: (tab: TabType) => void }
             </div>
           ))}
         </div>
-      </div>
+      </Area>
     </div>
   )
 }
@@ -683,7 +681,7 @@ This variant affects protein function and should be reviewed by a genetic counse
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Run Pipeline */}
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <div className="flex items-center gap-3 mb-4">
             <Play className="h-5 w-5 text-primary" />
             <h3 className="text-lg font-semibold">Run Pipeline</h3>
@@ -691,12 +689,11 @@ This variant affects protein function and should be reviewed by a genetic counse
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-2">Sample ID</label>
-              <input
+              <Input
                 type="text"
                 value={sampleId}
                 onChange={(e) => setSampleId(e.target.value)}
                 placeholder="e.g., SRR1517848"
-                className="w-full px-3 py-2 rounded-md border bg-background"
               />
             </div>
             <div>
@@ -758,10 +755,10 @@ This variant affects protein function and should be reviewed by a genetic counse
               {showConsole ? 'Hide Console' : 'Show Console'}
             </button>
           </div>
-        </div>
+        </Area>
 
         {/* AI Analysis */}
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <div className="flex items-center gap-3 mb-4">
             <Brain className="h-5 w-5 text-primary" />
             <h3 className="text-lg font-semibold">AI Analysis</h3>
@@ -769,22 +766,20 @@ This variant affects protein function and should be reviewed by a genetic counse
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-2">Gene Symbol</label>
-              <input
+              <Input
                 type="text"
                 value={geneSymbol}
                 onChange={(e) => setGeneSymbol(e.target.value)}
                 placeholder="e.g., BRCA1, TP53"
-                className="w-full px-3 py-2 rounded-md border bg-background"
               />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">Mutation ID</label>
-              <input
+              <Input
                 type="text"
                 value={mutationId}
                 onChange={(e) => setMutationId(e.target.value)}
                 placeholder="e.g., c.68_69delAG"
-                className="w-full px-3 py-2 rounded-md border bg-background"
               />
             </div>
             <button 
@@ -799,12 +794,12 @@ This variant affects protein function and should be reviewed by a genetic counse
               )}
             </button>
           </div>
-        </div>
+        </Area>
       </div>
 
       {/* Console Output */}
       {showConsole && (
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <Terminal className="h-5 w-5 text-primary" />
@@ -836,12 +831,12 @@ This variant affects protein function and should be reviewed by a genetic counse
               ))
             )}
           </div>
-        </div>
+        </Area>
       )}
 
       {/* Job Status */}
       {jobStatus && (
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <h3 className="text-lg font-semibold mb-4">Pipeline Status</h3>
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -859,24 +854,24 @@ This variant affects protein function and should be reviewed by a genetic counse
               <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${jobStatus.progress}%` }} />
             </div>
           </div>
-        </div>
+        </Area>
       )}
 
       {/* AI Result */}
       {aiResult && (
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <h3 className="text-lg font-semibold mb-4">AI Analysis Result</h3>
           <pre className="whitespace-pre-wrap text-sm bg-muted p-4 rounded-lg overflow-auto max-h-64">
             {aiResult}
           </pre>
-        </div>
+        </Area>
       )}
 
       {/* Detected Variants */}
-      <div className="p-6 bg-card rounded-lg border">
+      <Area>
         <h3 className="text-lg font-semibold mb-4">Detected Variants</h3>
         <VariantTable />
-      </div>
+      </Area>
     </div>
   )
 }
@@ -908,7 +903,7 @@ function SettingsContent() {
       <h2 className="text-2xl font-semibold">Settings</h2>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <div className="flex items-center gap-3 mb-4">
             <Database className="h-5 w-5" />
             <h3 className="text-lg font-semibold">Database Connections</h3>
@@ -932,9 +927,9 @@ function SettingsContent() {
               </div>
             ))}
           </div>
-        </div>
+        </Area>
 
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <div className="flex items-center gap-3 mb-4">
             <Settings className="h-5 w-5" />
             <h3 className="text-lg font-semibold">Pipeline Configuration</h3>
@@ -957,14 +952,14 @@ function SettingsContent() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">Quality Threshold (Phred)</label>
-              <input type="number" value={pipelineConfig.qualityThreshold} onChange={(e) => setPipelineConfig({...pipelineConfig, qualityThreshold: e.target.value})} min="0" max="60" className="w-full px-3 py-2 rounded-md border bg-background" />
+              <Input type="number" value={pipelineConfig.qualityThreshold} onChange={(e) => setPipelineConfig({...pipelineConfig, qualityThreshold: e.target.value})} min="0" max="60" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">Minimum Coverage</label>
-              <input type="number" value={pipelineConfig.minCoverage} onChange={(e) => setPipelineConfig({...pipelineConfig, minCoverage: e.target.value})} min="1" className="w-full px-3 py-2 rounded-md border bg-background" />
+              <Input type="number" value={pipelineConfig.minCoverage} onChange={(e) => setPipelineConfig({...pipelineConfig, minCoverage: e.target.value})} min="1" />
             </div>
           </div>
-        </div>
+        </Area>
       </div>
 
       <div className="flex items-center gap-4">
@@ -1112,46 +1107,42 @@ function ReferenceGenomesContent() {
       </div>
 
       {showUpload && (
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <h3 className="text-lg font-semibold mb-4">Upload Reference Genome</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-2">Name (e.g., hg38)</label>
-              <input
+              <Input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 rounded-md border bg-background"
                 placeholder="hg38"
               />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">Species</label>
-              <input
+              <Input
                 type="text"
                 value={species}
                 onChange={(e) => setSpecies(e.target.value)}
-                className="w-full px-3 py-2 rounded-md border bg-background"
                 placeholder="Homo sapiens"
               />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">Build (e.g., GRCh38)</label>
-              <input
+              <Input
                 type="text"
                 value={build}
                 onChange={(e) => setBuild(e.target.value)}
-                className="w-full px-3 py-2 rounded-md border bg-background"
                 placeholder="GRCh38"
               />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">FASTA File</label>
-              <input
+              <Input
                 type="file"
                 accept=".fa,.fasta,.fa.gz,.fasta.gz"
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
-                className="w-full px-3 py-2 rounded-md border bg-background"
               />
             </div>
           </div>
@@ -1171,22 +1162,22 @@ function ReferenceGenomesContent() {
               Cancel
             </button>
           </div>
-        </div>
+        </Area>
       )}
 
       {/* Genomes List */}
       <div className="grid gap-4">
         {isLoading ? (
-          <div className="p-6 bg-card rounded-lg border">
+          <Area>
             <RefreshCw className="h-6 w-6 animate-spin" />
-          </div>
+          </Area>
         ) : genomes.length === 0 ? (
-          <div className="p-6 bg-card rounded-lg border text-center text-muted-foreground">
+          <Area>
             No reference genomes uploaded yet
-          </div>
+          </Area>
         ) : (
           genomes.map(genome => (
-            <div key={genome.id} className="p-6 bg-card rounded-lg border">
+            <Area key={genome.id}>
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-3">
@@ -1224,14 +1215,14 @@ function ReferenceGenomesContent() {
                   </button>
                 </div>
               </div>
-            </div>
+            </Area>
           ))
         )}
       </div>
 
       {/* Console Output */}
       {showConsole && consoleOutput.length > 0 && (
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold">Indexing Progress</h3>
             <button onClick={() => setShowConsole(false)} className="p-1 hover:bg-accent rounded">
@@ -1243,7 +1234,7 @@ function ReferenceGenomesContent() {
               <div key={i}>{line}</div>
             ))}
           </div>
-        </div>
+        </Area>
       )}
     </div>
   )
@@ -1393,16 +1384,15 @@ function SamplesContent() {
       </div>
 
       {showUpload && (
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <h3 className="text-lg font-semibold mb-4">Upload Sample (FASTQ)</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-2">Sample Name</label>
-              <input
+              <Input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 rounded-md border bg-background"
                 placeholder="SRR1517848"
               />
             </div>
@@ -1421,20 +1411,18 @@ function SamplesContent() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">Forward Read (R1)</label>
-              <input
+              <Input
                 type="file"
                 accept=".fastq,.fastq.gz,.fq,.fq.gz"
                 onChange={(e) => setR1File(e.target.files?.[0] || null)}
-                className="w-full px-3 py-2 rounded-md border bg-background"
               />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">Reverse Read (R2) - Optional</label>
-              <input
+              <Input
                 type="file"
                 accept=".fastq,.fastq.gz,.fq,.fq.gz"
                 onChange={(e) => setR2File(e.target.files?.[0] || null)}
-                className="w-full px-3 py-2 rounded-md border bg-background"
               />
             </div>
           </div>
@@ -1454,22 +1442,22 @@ function SamplesContent() {
               Cancel
             </button>
           </div>
-        </div>
+        </Area>
       )}
 
       {/* Samples List */}
       <div className="grid gap-4">
         {isLoading ? (
-          <div className="p-6 bg-card rounded-lg border">
+          <Area>
             <RefreshCw className="h-6 w-6 animate-spin" />
-          </div>
+          </Area>
         ) : samples.length === 0 ? (
-          <div className="p-6 bg-card rounded-lg border text-center text-muted-foreground">
+          <Area>
             No samples uploaded yet. Upload a reference genome first!
-          </div>
+          </Area>
         ) : (
           samples.map(sample => (
-            <div key={sample.id} className="p-6 bg-card rounded-lg border">
+            <Area key={sample.id}>
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-3">
@@ -1508,14 +1496,14 @@ function SamplesContent() {
                   </button>
                 </div>
               </div>
-            </div>
+            </Area>
           ))
         )}
       </div>
 
       {/* Console Output */}
       {showConsole && consoleOutput.length > 0 && (
-        <div className="p-6 bg-card rounded-lg border">
+        <Area>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold">Pipeline Progress</h3>
             <button onClick={() => setShowConsole(false)} className="p-1 hover:bg-accent rounded">
@@ -1527,7 +1515,7 @@ function SamplesContent() {
               <div key={i}>{line}</div>
             ))}
           </div>
-        </div>
+        </Area>
       )}
     </div>
   )

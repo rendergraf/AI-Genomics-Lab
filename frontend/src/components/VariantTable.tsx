@@ -14,6 +14,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Search, Filter, Download, ChevronUp, ChevronDown, RefreshCw, Eye, FileText } from 'lucide-react'
 import api from '@/lib/api'
+import { Input } from './ui'
 
 interface Variant {
   id: string
@@ -289,12 +290,11 @@ export default function VariantTable({ variants = [], onVariantSelect }: Variant
       <div className="flex flex-wrap gap-4 items-center">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
+          <Input
             type="text"
             placeholder="Search by gene, position, or disease..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-md border bg-background"
           />
         </div>
         

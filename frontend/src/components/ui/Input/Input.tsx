@@ -83,12 +83,12 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       : "";
 
     return (
-      <div className="w-full">
+      <div className="w-full relative">
         <input
           ref={ref}
           disabled={disabled}
           className={cn(
-            "w-full rounded-xl outline-none transition-all duration-200",
+            "w-full outline-none transition-all duration-200 bg-zinc-800/80 text-base text-white",
             "placeholder:text-gray-400",
             "disabled:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50",
             sizeStyles[size],
@@ -101,6 +101,8 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
         {error && (
           <p className="mt-1 text-sm text-red-500">{error}</p>
         )}
+        <span className="absolute top-px right-px border-t-2 border-r-2 border-gray-500 w-[8px] h-[8px]"/>
+        <span className="absolute bottom-px left-px border-b-2 border-l-2 border-gray-500 w-[8px] h-[8px]"/>
       </div>
     );
   }

@@ -74,7 +74,6 @@ const StatCard = React.forwardRef<HTMLDivElement, StatCardProps>(
         className={cn("relative overflow-visible",statCardVariants({ iconSize: effectiveIconSize }), className)}
         {...props}
         style={{
-            backgroundColor: '#1c1e20',
             clipPath: 'polygon(0 0, 100% 0, 100% 67%, 92% 100%, 0 100%)',
             width: '100%',
           }}

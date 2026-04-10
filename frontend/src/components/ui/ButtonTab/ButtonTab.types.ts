@@ -39,8 +39,8 @@ export const buttonTabVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-zinc-700 text-muted-foreground hover:text-foreground",
-        active: "bg-zinc-600 border-b-2 border-gray-500 text-primary",
+        default: "bg-zinc-900/50 text-muted-foreground hover:text-foreground",
+        active: "bg-zinc-800/80 border-b-2 border-gray-500 text-primary",
       },
       size: {
         sm: "px-3 py-2 text-xs",

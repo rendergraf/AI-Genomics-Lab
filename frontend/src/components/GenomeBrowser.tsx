@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Search, ZoomIn, ZoomOut, RefreshCw, ChevronDown } from 'lucide-react'
+import { Input } from './ui'
 
 interface GenomeBrowserProps {
   initialLocus?: string
@@ -250,12 +251,11 @@ export default function GenomeBrowser({
         <div className="flex-1 min-w-[200px]">
           <label className="block text-sm font-medium mb-1">Locus (chr:start-end)</label>
           <div className="flex gap-2">
-            <input
+            <Input
               type="text"
               value={customLocusInput}
               onChange={(e) => setCustomLocusInput(e.target.value)}
               placeholder="e.g., 17:43044295-43170245"
-              className="flex-1 px-3 py-2 rounded-md border bg-background font-mono text-sm"
               onKeyPress={(e) => e.key === 'Enter' && navigateToLocus()}
             />
             <button 

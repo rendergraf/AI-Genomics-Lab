@@ -31,7 +31,7 @@ export type StatCardIconSize = "sm" | "default" | "lg";
  * Defines base classes and variant-specific styling rules.
  */
 export const statCardVariants = cva(
-  "p-6 bg-card",
+  "p-6 bg-card bg-zinc-900/50 shadow-xl",
   {
     variants: {
       iconSize: {
