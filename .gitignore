@@ -34,6 +34,14 @@ wheels/
 .installed.cfg
 *.egg
 
+# Dependency lock files
+Pipfile.lock
+poetry.lock
+requirements-dev.txt
+dev-requirements.txt
+requirements-*.txt
+!requirements.txt
+
 # Virtual environments
 venv/
 ENV/
@@ -48,6 +56,27 @@ env/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+# ============================================
+# Nextflow
+# ============================================
+.nextflow/
+.nextflow.log*
+nextflow-work/
+.nextflow/history
+nextflow.history
+nextflow.config.local
+nextflow.config.*
+!nextflow.config
+.nextflow/asset/*
+.nextflow/cache/*
+work/
+*.nextflow.log
+pipeline_reports/
+reports/
+pipeline_trace.txt
+pipeline_timeline.html
+pipeline_report.html
 
 # ============================================
 # Node.js
@@ -68,6 +97,13 @@ out/
 # Docker
 # ============================================
 .docker/
+docker-compose.override.yml
+docker-compose.local.yml
+docker-compose.dev.yml
+docker-compose.prod.yml
+docker-compose.test.yml
+docker-compose.*.yml
+!docker-compose.yml
 
 # ============================================
 # Data Files (Sensitive)
@@ -85,11 +121,25 @@ reference_genome/
 *.bed
 *.bcf
 
+# Genome index files
+*.fai
+*.gzi
+*.sti
+*.fa.gz
+*.fa.gz.fai
+*.fa.gz.gzi
+*.fa.gz.sti
+*.r150.sti
+
 # Database files
 *.db
 *.sqlite
 *.sqlite3
 neo4j-data/
+minio-data/
+*.sql
+*.sql.gz
+*.dump
 
 # ============================================
 # Logs
@@ -130,6 +180,18 @@ temp/
 *.crt
 credentials.json
 service-account.json
+
+# ============================================
+# Local Configuration
+# ============================================
+config.local.yaml
+config.local.yml
+settings.local.py
+local_settings.py
+.env.local
+.env.development
+.env.test
+.env.production.local
 
 # ============================================
 # Documentation Build

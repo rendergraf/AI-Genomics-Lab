@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { 
   Dna, Upload, FileText, Network, Beaker, Activity, Settings, 
-  Database, FolderOpen 
+  Database, FolderOpen, HardDrive
 } from 'lucide-react'
 import GraphView from '@/components/GraphView'
 import VariantTable from '@/components/VariantTable'
@@ -14,8 +14,9 @@ import { AnalysisSection } from '@/components/sections/AnalysisSection'
 import { SettingsSection } from '@/components/sections/SettingsSection'
 import { ReferenceGenomesSection } from '@/components/sections/ReferenceGenomesSection'
 import { SamplesSection } from '@/components/sections/SamplesSection'
+import { StorageSection } from '@/components/sections/StorageSection/StorageSection'
 
-type TabType = 'dashboard' | 'variants' | 'knowledge' | 'analysis' | 'genome' | 'settings' | 'genomes' | 'samples'
+type TabType = 'dashboard' | 'variants' | 'knowledge' | 'analysis' | 'genome' | 'settings' | 'genomes' | 'samples' | 'storage'
 
 const tabs = [
   { id: 'dashboard', label: 'Dashboard', icon: Activity },
@@ -24,6 +25,7 @@ const tabs = [
   { id: 'genomes', label: 'Reference Genomes', icon: Database },
   { id: 'samples', label: 'Samples/Tests', icon: Beaker },
   { id: 'analysis', label: 'Analysis', icon: Beaker },
+  { id: 'storage', label: 'Storage', icon: HardDrive },
   { id: 'genome', label: 'Genome Browser', icon: FolderOpen },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
@@ -62,6 +64,10 @@ export default function Home() {
             <GenomeBrowser />
           </div>
         )
+      case 'storage':
+        return <StorageSection />
+      case 'storage':
+        return <StorageSection />
       case 'settings':
         return <SettingsSection />
       default:
@@ -88,7 +94,7 @@ export default function Home() {
         </div>
       </header>
 
-      <nav className="border-b border-gray-500 bg-card">
+      <nav className=" bg-card">
         <div className="container mx-auto px-4">
           <div className="flex gap-1 overflow-x-auto">
             {tabs.map((tab) => (

@@ -77,6 +77,19 @@ class Sample:
     updated_at: datetime
 
 
+@dataclass
+class PipelineJob:
+    """Pipeline job data model"""
+    id: int
+    pipeline_name: str
+    status: str  # "pending", "running", "completed", "failed"
+    parameters: str  # JSON string
+    logs_path: Optional[str]
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
+    created_at: datetime
+
+
 class DatabaseService:
     """Service for managing reference genomes and samples in PostgreSQL"""
     
@@ -149,6 +162,21 @@ class DatabaseService:
                     cram_path VARCHAR(512),
                     vcf_path VARCHAR(512),
                     status VARCHAR(50) NOT NULL DEFAULT 'uploaded',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create pipeline_jobs table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS pipeline_jobs (
+                    id SERIAL PRIMARY KEY,
+                    pipeline_name VARCHAR(255) NOT NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+                    parameters TEXT,
+                    logs_path VARCHAR(512),
+                    started_at TIMESTAMP,
+                    finished_at TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -353,6 +381,79 @@ class DatabaseService:
             """, sample_id)
             
             return result == "DELETE 1"
+    
+    # ==================== PIPELINE JOBS ====================
+    
+    async def create_pipeline_job(
+        self,
+        pipeline_name: str,
+        parameters: str
+    ) -> PipelineJob:
+        """Create a new pipeline job entry"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO pipeline_jobs (pipeline_name, status, parameters)
+                VALUES ($1, 'pending', $2)
+                RETURNING id, pipeline_name, status, parameters, logs_path, started_at, finished_at, created_at
+            """, pipeline_name, parameters)
+            
+            return PipelineJob(**dict(row))
+    
+    async def get_pipeline_job(self, job_id: int) -> Optional[PipelineJob]:
+        """Get a pipeline job by ID"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, pipeline_name, status, parameters, logs_path, started_at, finished_at, created_at
+                FROM pipeline_jobs
+                WHERE id = $1
+            """, job_id)
+            
+            return PipelineJob(**dict(row)) if row else None
+    
+    async def get_pipeline_jobs(self) -> List[PipelineJob]:
+        """Get all pipeline jobs"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, pipeline_name, status, parameters, logs_path, started_at, finished_at, created_at
+                FROM pipeline_jobs
+                ORDER BY created_at DESC
+            """)
+            
+            return [PipelineJob(**dict(row)) for row in rows]
+    
+    async def update_pipeline_job_status(
+        self,
+        job_id: int,
+        status: str,
+        logs_path: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        finished_at: Optional[datetime] = None
+    ) -> Optional[PipelineJob]:
+        """Update pipeline job status"""
+        async with self.pool.acquire() as conn:
+            query = "UPDATE pipeline_jobs SET status = $2, updated_at = CURRENT_TIMESTAMP"
+            params = [job_id, status]
+            param_count = 2
+            
+            if logs_path is not None:
+                param_count += 1
+                query += f", logs_path = ${param_count}"
+                params.append(logs_path)
+            
+            if started_at is not None:
+                param_count += 1
+                query += f", started_at = ${param_count}"
+                params.append(started_at)
+            
+            if finished_at is not None:
+                param_count += 1
+                query += f", finished_at = ${param_count}"
+                params.append(finished_at)
+            
+            query += f" WHERE id = $1 RETURNING id, pipeline_name, status, parameters, logs_path, started_at, finished_at, created_at"
+            
+            row = await conn.fetchrow(query, *params)
+            return PipelineJob(**dict(row)) if row else None
     
     # ==================== UTILITY ====================
     

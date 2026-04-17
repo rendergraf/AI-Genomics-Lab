@@ -1,7 +1,12 @@
 FROM python:3.11-slim
 
-# Install docker CLI for docker exec commands
-RUN apt-get update && apt-get install -y docker.io && rm -rf /var/lib/apt/lists/*
+# Install docker CLI for docker exec commands and Java for Nextflow
+RUN apt-get update && apt-get install -y docker.io openjdk-21-jre-headless curl && rm -rf /var/lib/apt/lists/*
+
+# Install Nextflow
+RUN curl -fsSL https://get.nextflow.io | bash && \
+    chmod +x nextflow && \
+    mv nextflow /usr/local/bin/
 
 WORKDIR /app
 

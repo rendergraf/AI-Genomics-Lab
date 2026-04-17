@@ -22,10 +22,6 @@ Select component for choosing from options.
   },
   tags: ["autodocs"],
   argTypes: {
-    variant: {
-      control: "select",
-      options: ["default", "error"],
-    },
     selectSize: {
       control: "select",
       options: ["sm", "md", "lg"],
@@ -36,14 +32,13 @@ Select component for choosing from options.
   },
   args: {
     onChange: fn(),
-    placeholder: "-- Select an option --",
     options: [
       { value: "option1", label: "Option 1" },
       { value: "option2", label: "Option 2" },
       { value: "option3", label: "Option 3" },
     ],
   },
-} satisfies Meta<typeof Select>;
+} as Meta<typeof Select>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;

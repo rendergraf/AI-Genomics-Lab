@@ -13,6 +13,7 @@ services:
       - "8000:8000"
     volumes:
       - ../bio-pipeline:/pipeline
+      - ../pipelines:/pipelines
       - ../datasets:/datasets
       - datasets-logs:/datasets/logs
       - /var/run/docker.sock:/var/run/docker.sock
@@ -25,13 +26,12 @@ services:
       - MINIO_ACCESS_KEY=genomics
       - MINIO_SECRET_KEY=genomics
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - REFERENCE_GENOME_GZ=/datasets/reference_genome/hg38.fa.gz
-      - REFERENCE_GENOME=/datasets/reference_genome/hg38.fa
-      - DOCKER_HOST=unix:///var/run/docker.sock
+      - NXF_WORK=/nextflow-work
     depends_on:
       - postgres
       - neo4j
       - minio
+      - bio-pipeline
     networks:
       - genomics-network
 
@@ -90,7 +90,7 @@ services:
       - genomics-network
 
   # =======================
-  # Bioinformatics Pipeline
+  # Bioinformatics Pipeline (con Nextflow integrado)
   # =======================
   bio-pipeline:
     build:
@@ -102,21 +102,21 @@ services:
     mem_reservation: 16g
     volumes:
       - ../bio-pipeline:/pipeline
+      - ../pipelines:/pipelines
       - ../datasets:/datasets
-      - datasets-logs:/datasets/logs
-      - datasets-bam:/datasets/bam
-      - datasets-vcf:/datasets/vcf
-      - datasets-annotations:/datasets/annotations
-      - reference-data:/datasets/reference_genome
-      - fastq-data:/datasets/fastq
+      - ../datasets/reference_genome:/datasets/reference_genome
+      - ../datasets/fastq:/datasets/fastq
+      - nextflow-work:/nextflow-work
     environment:
-      - REFERENCE_GENOME_GZ=/datasets/reference_genome/hg38.fa.gz
-      - REFERENCE_GENOME=/datasets/reference_genome/hg38.fa
       - INPUT_DIR=/datasets/fastq
       - OUTPUT_DIR=/datasets/bam
       - VCF_OUTPUT_DIR=/datasets/vcf
       - ANNOTATION_DIR=/datasets/annotations
       - LOGS_DIR=/datasets/logs
+      - NXF_WORK=/nextflow-work
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=genomics
+      - MINIO_SECRET_KEY=genomics
     networks:
       - genomics-network
 
@@ -136,7 +136,7 @@ services:
       - /app/.next
     environment:
       - NODE_ENV=development
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - API_HOST=ai-genomics-api
     depends_on:
       - api
     networks:
@@ -163,3 +163,4 @@ volumes:
   datasets-bam:
   datasets-vcf:
   datasets-annotations:
+  nextflow-work:

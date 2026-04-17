@@ -89,8 +89,23 @@ RUN pip3 install --no-cache-dir \
     cython \
     numpy
 
+# Install Java 21 (required for Nextflow 25+)
+RUN apt-get update && apt-get install -y openjdk-21-jre-headless && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Nextflow
+RUN curl -fsSL https://get.nextflow.io | bash && \
+    chmod +x nextflow && \
+    mv nextflow /usr/local/bin/ && \
+    nextflow -version
+
+# Install MinIO client (mc) for file storage
+RUN curl https://dl.min.io/client/mc/release/linux-amd64/mc \
+    -o /usr/local/bin/mc && \
+    chmod +x /usr/local/bin/mc
+
 # Create working directories
-RUN mkdir -p /pipeline /datasets /reference /output
+RUN mkdir -p /pipeline /datasets /reference /output /nextflow-work
 
 WORKDIR /pipeline
 
