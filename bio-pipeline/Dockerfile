@@ -105,13 +105,13 @@ RUN curl https://dl.min.io/client/mc/release/linux-amd64/mc \
     chmod +x /usr/local/bin/mc
 
 # Create working directories
-RUN mkdir -p /pipeline /datasets /reference /output /nextflow-work
+RUN mkdir -p /bio-pipeline /datasets /reference /output /nextflow-work
 
-WORKDIR /pipeline
+WORKDIR /bio-pipeline
 
 # Copy pipeline scripts
-COPY scripts/ /pipeline/scripts/
-RUN chmod +x /pipeline/scripts/*.sh
+COPY scripts/ /bio-pipeline/scripts/
+RUN chmod +x /bio-pipeline/scripts/*.sh
 
 # Default command
 CMD ["/bin/bash"]

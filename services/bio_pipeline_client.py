@@ -104,14 +104,14 @@ class BioPipelineClient:
         env["VCF_OUTPUT_DIR"] = self.vcf_dir
         env["ANNOTATION_DIR"] = self.annotation_dir
         
-        pipeline_script = "/pipeline/scripts/pipeline.sh"
+        pipeline_script = "/bio-pipeline/scripts/pipeline.sh"
         
         # Validate pipeline script exists
         if not Path(pipeline_script).exists():
             # Try to find the script in alternative locations
             alternative_paths = [
-                "/pipeline/scripts/pipeline.sh",
-                "/app/pipeline/scripts/pipeline.sh",
+                "/bio-pipeline/scripts/pipeline.sh",
+                "/app/bio-pipeline/scripts/pipeline.sh",
                 "./bio-pipeline/scripts/pipeline.sh",
                 "../bio-pipeline/scripts/pipeline.sh",
             ]
@@ -355,13 +355,13 @@ class BioPipelineClient:
         env["VCF_OUTPUT_DIR"] = self.vcf_dir
         env["ANNOTATION_DIR"] = self.annotation_dir
         
-        pipeline_script = "/pipeline/scripts/pipeline.sh"
+        pipeline_script = "/bio-pipeline/scripts/pipeline.sh"
         
         # Validate pipeline script exists
         if not Path(pipeline_script).exists():
             alternative_paths = [
-                "/pipeline/scripts/pipeline.sh",
-                "/app/pipeline/scripts/pipeline.sh",
+                "/bio-pipeline/scripts/pipeline.sh",
+                "/app/bio-pipeline/scripts/pipeline.sh",
                 "./bio-pipeline/scripts/pipeline.sh",
                 "../bio-pipeline/scripts/pipeline.sh",
             ]

@@ -36,7 +36,7 @@ class NextflowRunner:
         else:
             pipeline_file = "genome_index_correct.nf"
         
-        nextflow_cmd = f"nextflow run /pipeline/{pipeline_file} -ansi-log false"
+        nextflow_cmd = f"nextflow run /bio-pipeline/{pipeline_file} -ansi-log false"
         nextflow_cmd += f" --genome_id {genome_id}"
         nextflow_cmd += f" --output_dir {output_dir}"
         nextflow_cmd += f" -work-dir /nextflow-work/{job_id}"
@@ -46,7 +46,7 @@ class NextflowRunner:
         cmd = [
             "docker", "exec", "ai-genomics-bio",
             "bash", "-c",
-            f"mkdir -p {reports_dir} && cd /pipeline && stdbuf -o0 -e0 {nextflow_cmd} 2>&1"
+            f"mkdir -p {reports_dir} && cd /bio-pipeline && stdbuf -o0 -e0 {nextflow_cmd} 2>&1"
         ]
         
         logger.info(f"Starting Nextflow genome indexing: {' '.join(cmd)}")

@@ -12,8 +12,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ../bio-pipeline:/pipeline
-      - ../pipelines:/pipelines
+      - ../bio-pipeline:/bio-pipeline
       - ../datasets:/datasets
       - datasets-logs:/datasets/logs
       - /var/run/docker.sock:/var/run/docker.sock
@@ -101,8 +100,7 @@ services:
     mem_limit: 24g
     mem_reservation: 16g
     volumes:
-      - ../bio-pipeline:/pipeline
-      - ../pipelines:/pipelines
+      - ../bio-pipeline:/bio-pipeline
       - ../datasets:/datasets
       - ../datasets/reference_genome:/datasets/reference_genome
       - ../datasets/fastq:/datasets/fastq
@@ -142,7 +140,26 @@ services:
     networks:
       - genomics-network
 
-# =======================
+  # =======================
+  # PostgreSQL Web Admin (pgAdmin)
+  # =======================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ai-genomics-pgadmin
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@genomics.com
+      PGADMIN_DEFAULT_PASSWORD: genomics
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGADMIN_CONFIG_SERVERS: '{"Servers": {"1": {"Name": "AI Genomics PostgreSQL", "Group": "Servers", "Host": "postgres", "Port": 5432, "Username": "genomics", "Password": "genomics", "MaintenanceDB": "genomics", "SSLMode": "prefer", "PassFile": "", "SSLCert": "", "SSLKey": "", "SSLRootCert": "", "Timeout": 10}}}'
+    depends_on:
+      - postgres
+    networks:
+      - genomics-network
+
+  # =======================
 # Networks
 # =======================
 networks:

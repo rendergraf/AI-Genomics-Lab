@@ -72,11 +72,13 @@ nextflow.config.*
 .nextflow/cache/*
 work/
 *.nextflow.log
+nextflow
 pipeline_reports/
 reports/
 pipeline_trace.txt
 pipeline_timeline.html
 pipeline_report.html
+bio-pipeline/report-*.html
 
 # ============================================
 # Node.js
@@ -108,7 +110,8 @@ docker-compose.*.yml
 # ============================================
 # Data Files (Sensitive)
 # ============================================
-datasets/
+datasets/**
+!datasets/.gitkeep
 reference_genome/
 *.fastq
 *.fq

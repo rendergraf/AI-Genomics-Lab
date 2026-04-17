@@ -13,7 +13,7 @@ echo "📋 Test 1: Manual Nextflow execution (hg38-test - chromosome 21)"
 echo "----------------------------------------------------------------"
 
 docker exec ai-genomics-bio bash -c "
-    cd /pipeline && \
+    cd /bio-pipeline && \
     rm -rf /datasets/test_output_final && \
     mkdir -p /datasets/test_output_final && \
     stdbuf -o0 -e0 nextflow run genome_index_test_small.nf \
@@ -42,7 +42,7 @@ docker exec ai-genomics-bio bash -c "
     ls -la /datasets/test_output_final/hg38-test.fa.gz*
     echo ''
     echo '📄 Results file:'
-    cat /pipeline/hg38-test_prep_results.txt 2>/dev/null || echo 'Results file not found'
+    cat /bio-pipeline/hg38-test_prep_results.txt 2>/dev/null || echo 'Results file not found'
 "
 
 echo ""
