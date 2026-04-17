@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { fn } from "@storybook/test";
+import { vi } from "vitest";
 import { Select } from "./index";
 
 const meta = {
@@ -31,7 +31,7 @@ Select component for choosing from options.
     },
   },
   args: {
-    onChange: fn(),
+    onChange: vi.fn(),
     options: [
       { value: "option1", label: "Option 1" },
       { value: "option2", label: "Option 2" },

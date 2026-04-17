@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { fn } from "@storybook/test";
+import { vi } from "vitest";
 import { Input } from "./index";
 
 /**
@@ -41,7 +41,7 @@ Input component for text entry.
     },
   },
   args: {
-    onChange: fn(),
+    onChange: vi.fn(),
     placeholder: "Enter text...",
   },
 } satisfies Meta<typeof Input>;

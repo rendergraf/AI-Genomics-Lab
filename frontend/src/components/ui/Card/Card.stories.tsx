@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { fn } from "@storybook/test";
+import { vi } from "vitest";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "./index";
 import { Button } from "../Button";
 
@@ -36,7 +36,7 @@ Card component for displaying content in a container.
     },
   },
   args: {
-    onClick: fn(),
+    onClick: vi.fn(),
   },
 } satisfies Meta<typeof Card>;
 

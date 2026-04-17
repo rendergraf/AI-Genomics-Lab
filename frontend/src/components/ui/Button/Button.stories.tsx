@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { fn } from "@storybook/test";
+import { vi } from "vitest";
 import { Button, BUTTON_DATA } from "./index";
 
 /**
@@ -35,7 +35,7 @@ const meta = {
     },
   },
   args: {
-    onClick: fn(),
+    onClick: vi.fn(),
   },
 } satisfies Meta<typeof Button>;
 
