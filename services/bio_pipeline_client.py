@@ -23,6 +23,10 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Import MinIO service
+from services.minio_service import get_minio_service
+import asyncio
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -57,11 +61,95 @@ class BioPipelineClient:
         )
         self.fastq_dir = os.getenv("FASTQ_DIR", f"{datasets_dir}/fastq")
     
+    def _ensure_reference_genome(self, genome_name: str = "hg38") -> bool:
+        """
+        Ensure reference genome files exist locally, download from MinIO if needed.
+        Returns True if all required files exist or were downloaded successfully.
+        """
+        try:
+            # Determine which genome we need based on name
+            # For simplicity, assume genome_name matches the MinIO prefix
+            minio_service = get_minio_service()
+            bucket = "genomics"
+            prefix = f"reference_genome/{genome_name}"
+            
+            # Define required files
+            required_files = [
+                f"{genome_name}.fa.gz",
+                f"{genome_name}.fa.gz.fai",
+                f"{genome_name}.fa.gz.gzi",
+                f"{genome_name}.fa.gz.sti"
+            ]
+            
+            # Check local existence
+            local_dir = Path(self.reference_dir)
+            all_exist = True
+            
+            for filename in required_files:
+                local_path = local_dir / filename
+                if not local_path.exists():
+                    all_exist = False
+                    break
+            
+            if all_exist:
+                logger.info(f"All reference genome files exist locally for {genome_name}")
+                return True
+            
+            # Some files missing, try to download from MinIO
+            logger.info(f"Downloading reference genome {genome_name} from MinIO...")
+            
+            # Run async download synchronously
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is already running (e.g., in async context), we need to use create_task
+                # For simplicity, create a new event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            downloaded_count = 0
+            for filename in required_files:
+                local_path = local_dir / filename
+                object_name = f"{prefix}/{filename}"
+                
+                try:
+                    # Check if object exists in MinIO
+                    exists_future = minio_service.object_exists(bucket, object_name)
+                    exists = loop.run_until_complete(exists_future)
+                    
+                    if exists:
+                        # Download the file
+                        download_future = minio_service.download_file(bucket, object_name, str(local_path))
+                        result = loop.run_until_complete(download_future)
+                        if result.get("status") == "success":
+                            logger.info(f"Downloaded {filename} from MinIO")
+                            downloaded_count += 1
+                        else:
+                            logger.warning(f"Failed to download {filename}: {result.get('message')}")
+                    else:
+                        logger.warning(f"File {object_name} not found in MinIO")
+                except Exception as e:
+                    logger.error(f"Error downloading {filename} from MinIO: {e}")
+            
+            # Return True if at least the main FASTA file was downloaded
+            main_file = f"{genome_name}.fa.gz"
+            main_path = local_dir / main_file
+            if main_path.exists():
+                logger.info(f"Reference genome {genome_name} is available locally")
+                return True
+            else:
+                logger.error(f"Main reference genome file {main_file} not found locally or in MinIO")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error ensuring reference genome: {e}")
+            return False
+    
     def run_pipeline(
         self,
         input_file: str,
         sample_id: str,
-        reference: Optional[str] = None
+        reference: Optional[str] = None,
+        genome_name: str = "hg38"
     ) -> Dict[str, Any]:
         """
         Run the bioinformatics pipeline on input file
@@ -74,6 +162,10 @@ class BioPipelineClient:
         Returns:
             Dict with pipeline results
         """
+        # Ensure reference genome files are available locally (download from MinIO if needed)
+        if not self._ensure_reference_genome(genome_name):
+            logger.warning(f"Reference genome {genome_name} may not be fully available locally")
+        
         reference = reference or self.reference_genome
         
         # Check if compressed genome exists and decompress if needed

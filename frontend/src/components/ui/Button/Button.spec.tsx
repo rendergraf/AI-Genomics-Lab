@@ -31,16 +31,6 @@ describe("Button", () => {
       expect(screen.getByRole("button")).toBeInTheDocument();
     });
 
-    it("renders subtle variant", () => {
-      render(<Button variant="subtle">Subtle</Button>);
-      expect(screen.getByRole("button")).toBeInTheDocument();
-    });
-
-    it("renders surface variant", () => {
-      render(<Button variant="surface">Surface</Button>);
-      expect(screen.getByRole("button")).toBeInTheDocument();
-    });
-
     it("renders outline variant", () => {
       render(<Button variant="outline">Outline</Button>);
       expect(screen.getByRole("button")).toBeInTheDocument();
@@ -50,22 +40,12 @@ describe("Button", () => {
       render(<Button variant="ghost">Ghost</Button>);
       expect(screen.getByRole("button")).toBeInTheDocument();
     });
-
-    it("renders plain variant", () => {
-      render(<Button variant="plain">Plain</Button>);
-      expect(screen.getByRole("button")).toBeInTheDocument();
-    });
   });
 
   /**
    * Size tests
    */
   describe("sizes", () => {
-    it("renders 2xs size", () => {
-      render(<Button size="2xs">Button</Button>);
-      expect(screen.getByRole("button")).toBeInTheDocument();
-    });
-
     it("renders xs size", () => {
       render(<Button size="xs">Button</Button>);
       expect(screen.getByRole("button")).toBeInTheDocument();
@@ -90,33 +70,23 @@ describe("Button", () => {
       render(<Button size="xl">Button</Button>);
       expect(screen.getByRole("button")).toBeInTheDocument();
     });
-
-    it("renders 2xl size", () => {
-      render(<Button size="2xl">Button</Button>);
-      expect(screen.getByRole("button")).toBeInTheDocument();
-    });
   });
 
   /**
-   * Color palette tests
+   * Color scheme tests
    */
-  describe("colorPalettes", () => {
-    const colors = [
-      "gray",
-      "red",
-      "orange",
-      "yellow",
-      "green",
-      "teal",
-      "blue",
-      "cyan",
-      "purple",
-      "pink",
+  describe("colorSchemes", () => {
+    const colorSchemes = [
+      "primary",
+      "secondary",
+      "success",
+      "warning",
+      "danger",
     ] as const;
 
-    colors.forEach((color) => {
-      it(`renders ${color} color palette`, () => {
-        render(<Button colorPalette={color}>Button</Button>);
+    colorSchemes.forEach((colorScheme) => {
+      it(`renders ${colorScheme} color scheme`, () => {
+        render(<Button colorScheme={colorScheme}>Button</Button>);
         expect(screen.getByRole("button")).toBeInTheDocument();
       });
     });

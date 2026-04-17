@@ -24,7 +24,7 @@ services:
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=genomics
       - MINIO_SECRET_KEY=genomics
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - NXF_WORK=/nextflow-work
     depends_on:
       - postgres

@@ -13,6 +13,8 @@ import os
 import json
 import re
 import uuid
+import logging
+import shutil
 from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Form, Path
@@ -23,6 +25,7 @@ from dotenv import load_dotenv
 # Import services
 from services.nextflow_runner import get_nextflow_runner
 from services.database_service import get_database_service
+from services.minio_service import get_minio_service
 
 # Load environment variables
 load_dotenv()
@@ -158,9 +161,12 @@ REMOTE_GENOMES = {
 }
 
 
-def check_genome_indexed(genome_id: str) -> dict:
-    """Check if a genome is indexed by verifying file existence"""
-    base_dir = "/datasets/reference_genome"
+async def check_genome_indexed(genome_id: str) -> dict:
+    """Check if a genome is indexed by verifying file existence in MinIO"""
+    minio_service = get_minio_service()
+    bucket = "genomics"
+    prefix = f"reference_genome/{genome_id}"
+    
     files = {
         "bgzip_fasta": f"{genome_id}.fa.gz",
         "fai_index": f"{genome_id}.fa.gz.fai",
@@ -170,8 +176,16 @@ def check_genome_indexed(genome_id: str) -> dict:
     
     status = {}
     for key, filename in files.items():
-        path = os.path.join(base_dir, filename)
-        status[key] = os.path.exists(path)
+        object_name = f"{prefix}/{filename}"
+        try:
+            exists = await minio_service.object_exists(bucket, object_name)
+            status[key] = exists
+        except Exception as e:
+            # If MinIO check fails, fall back to local filesystem for backward compatibility
+            logger = logging.getLogger(__name__)
+            logger.warning(f"MinIO check failed for {bucket}/{object_name}: {e}, falling back to local")
+            local_path = f"/datasets/reference_genome/{filename}"
+            status[key] = os.path.exists(local_path)
     
     # Consider indexed if all required files exist (bgzip_fasta is mandatory, others preferred)
     indexed = status.get("bgzip_fasta", False)  # At least the main file should exist
@@ -179,7 +193,8 @@ def check_genome_indexed(genome_id: str) -> dict:
         "genome_id": genome_id,
         "indexed": indexed,
         "files": status,
-        "paths": {key: os.path.join(base_dir, filename) for key, filename in files.items()}
+        "storage": "minio",  # Indicate that files are stored in MinIO
+        "paths": {key: f"s3://{bucket}/{prefix}/{filename}" for key, filename in files.items()}
     }
 
 
@@ -188,7 +203,7 @@ async def get_indexed_genomes():
     """Get indexing status for all available genomes"""
     status = {}
     for genome_id in REMOTE_GENOMES.keys():
-        status[genome_id] = check_genome_indexed(genome_id)
+        status[genome_id] = await check_genome_indexed(genome_id)
     return status
 
 
@@ -203,14 +218,14 @@ async def get_genome_status(
             detail=f"Unknown genome: {genome_id}. Available: {list(REMOTE_GENOMES.keys())}"
         )
     
-    return check_genome_indexed(genome_id)
+    return await check_genome_indexed(genome_id)
 
 
 @app.delete("/genome/index/{genome_id}", tags=["Genome"], summary="Delete genome index files")
 async def delete_genome_index(
     genome_id: str = Path(..., description="Genome ID: hg38, hg38-test (chromosome 21), or hg19")
 ):
-    """Delete genome index files (bgzip, fai, gzi, sti)"""
+    """Delete genome index files (bgzip, fai, gzi, sti) from local storage and MinIO"""
     if genome_id not in REMOTE_GENOMES:
         raise HTTPException(
             status_code=400,
@@ -225,23 +240,45 @@ async def delete_genome_index(
         f"{genome_id}.fa.gz.sti"
     ]
     
-    deleted = []
+    deleted_local = []
+    deleted_minio = []
     errors = []
     
+    # Delete local files
     for filename in files_to_delete:
         path = os.path.join(base_dir, filename)
         try:
             if os.path.exists(path):
                 os.remove(path)
-                deleted.append(filename)
+                deleted_local.append(filename)
         except Exception as e:
-            errors.append(f"{filename}: {str(e)}")
+            errors.append(f"local:{filename}: {str(e)}")
+    
+    # Delete MinIO objects
+    try:
+        minio_service = get_minio_service()
+        bucket = "genomics"
+        prefix = f"reference_genome/{genome_id}"
+        
+        for filename in files_to_delete:
+            object_name = f"{prefix}/{filename}"
+            try:
+                exists = await minio_service.object_exists(bucket, object_name)
+                if exists:
+                    await minio_service.delete_object(bucket, object_name)
+                    deleted_minio.append(filename)
+            except Exception as e:
+                errors.append(f"minio:{filename}: {str(e)}")
+    except Exception as e:
+        errors.append(f"minio_service: {str(e)}")
     
     return {
         "genome_id": genome_id,
-        "deleted": deleted,
+        "deleted_local": deleted_local,
+        "deleted_minio": deleted_minio,
         "errors": errors,
-        "success": len(errors) == 0
+        "success": len(errors) == 0,
+        "storage": "minio" if deleted_minio else "local_only"
     }
 
 
@@ -310,13 +347,15 @@ async def genome_index(
             yield f"data: {json.dumps({'type': 'job', 'job_id': pipeline_job.id, 'status': 'running'})}\n\n"
             yield f"data: {json.dumps({'type': 'log', 'message': f'🚀 Starting Nextflow genome indexing pipeline for {genome_id}...'})}\n\n"
             yield f"data: {json.dumps({'type': 'log', 'message': f'📦 Job ID: {pipeline_job.id}'})}\n\n"
-            yield f"data: {json.dumps({'type': 'log', 'message': '📂 Output directory: /datasets/reference_genome'})}\n\n"
+            yield f"data: {json.dumps({'type': 'log', 'message': '📂 Processing in temporary directory, files will be uploaded to MinIO'})}\n\n"
             
             # Start Nextflow pipeline
             job_info = nextflow_runner.run_genome_indexing(
                 genome_id=genome_id,
-                output_dir="/datasets/reference_genome",
-                job_id=str(pipeline_job.id)
+                output_dir=None,  # Use temporary directory
+                job_id=str(pipeline_job.id),
+                minio_bucket="genomics",
+                minio_prefix="reference_genome"
             )
             
             # Update job with log file path
@@ -363,6 +402,9 @@ async def genome_index(
                 return None
             
             # Stream the logs
+            pipeline_success = False
+            pipeline_error_message = None
+            
             for log_line in nextflow_runner.stream_pipeline_logs(job_info):
                 # Check if log_line is already in SSE format
                 if log_line.startswith('data: '):
@@ -370,6 +412,14 @@ async def genome_index(
                     try:
                         data = json.loads(log_line[6:].strip())
                         message = data.get('message', '')
+                        msg_type = data.get('type', '')
+                        
+                        # Detect pipeline completion or error
+                        if msg_type == 'complete':
+                            pipeline_success = True
+                        elif msg_type == 'error':
+                            pipeline_success = False
+                            pipeline_error_message = message
                         
                         # Detect stage changes
                         new_stage = detect_stage(message)
@@ -389,15 +439,76 @@ async def genome_index(
                     # Legacy format, just forward as log
                     yield log_line
             
-            # Update job status to completed
-            await db_service.update_pipeline_job_status(
-                job_id=pipeline_job.id,
-                status="completed",
-                finished_at=datetime.now()
-            )
-            yield f"data: {json.dumps({'type': 'job', 'job_id': pipeline_job.id, 'status': 'completed'})}\n\n"
-            yield f"data: {json.dumps({'type': 'complete', 'message': 'Pipeline completed successfully'})}\n\n"
+            # Update job status based on pipeline success
+            if pipeline_success:
+                await db_service.update_pipeline_job_status(
+                    job_id=pipeline_job.id,
+                    status="completed",
+                    finished_at=datetime.now()
+                )
+                yield f"data: {json.dumps({'type': 'job', 'job_id': pipeline_job.id, 'status': 'completed'})}\n\n"
+                yield f"data: {json.dumps({'type': 'complete', 'message': 'Pipeline completed successfully'})}\n\n"
                 
+                # Create/update reference genome record in database with MinIO URLs
+                try:
+                    minio_service = get_minio_service()
+                    bucket = "genomics"
+                    prefix = f"reference_genome/{genome_id}"
+                    
+                    # Build MinIO URLs
+                    bgzip_url = f"s3://{bucket}/{prefix}/{genome_id}.fa.gz"
+                    fai_url = f"s3://{bucket}/{prefix}/{genome_id}.fa.gz.fai"
+                    gzi_url = f"s3://{bucket}/{prefix}/{genome_id}.fa.gz.gzi"
+                    sti_url = f"s3://{bucket}/{prefix}/{genome_id}.fa.gz.sti"
+                    
+                    # Check if reference genome already exists
+                    existing_genome = await db_service.get_reference_genome_by_name(genome_info["name"])
+                    
+                    if existing_genome:
+                        # Update existing record with MinIO URLs
+                        await db_service.update_reference_genome_status(
+                            genome_id=existing_genome.id,
+                            status="ready",
+                            gz_path=bgzip_url,
+                            fai_path=fai_url,
+                            gzi_path=gzi_url,
+                            sti_path=sti_url
+                        )
+                        yield f"data: {json.dumps({'type': 'log', 'message': f'✅ Updated reference genome record with MinIO URLs'})}\n\n"
+                    else:
+                        # Create new record
+                        await db_service.create_reference_genome(
+                            name=genome_info["name"],
+                            species=genome_info["species"],
+                            build=genome_info["build"],
+                            file_path=bgzip_url  # Store MinIO URL as file_path
+                        )
+                        # Update with additional paths
+                        existing = await db_service.get_reference_genome_by_name(genome_info["name"])
+                        if existing:
+                            await db_service.update_reference_genome_status(
+                                genome_id=existing.id,
+                                status="ready",
+                                gz_path=bgzip_url,
+                                fai_path=fai_url,
+                                gzi_path=gzi_url,
+                                sti_path=sti_url
+                            )
+                        yield f"data: {json.dumps({'type': 'log', 'message': f'✅ Created reference genome record with MinIO URLs'})}\n\n"
+                except Exception as db_error:
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to update database with MinIO URLs: {db_error}")
+                    yield f"data: {json.dumps({'type': 'log', 'message': f'⚠️ Database update failed: {db_error}'})}\n\n"
+            else:
+                # Pipeline failed
+                await db_service.update_pipeline_job_status(
+                    job_id=pipeline_job.id,
+                    status="failed",
+                    finished_at=datetime.now()
+                )
+                yield f"data: {json.dumps({'type': 'job', 'job_id': pipeline_job.id, 'status': 'failed'})}\n\n"
+                error_msg = pipeline_error_message or "Pipeline failed"
+                yield f"data: {json.dumps({'type': 'error', 'message': f'❌ {error_msg}'})}\n\n"
         except Exception as e:
             # Update job status to failed
             try:

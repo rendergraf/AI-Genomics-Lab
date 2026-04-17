@@ -11,9 +11,12 @@ nextflow.enable.dsl = 2
 params.genome_id = "hg38"
 params.output_dir = "/datasets/reference_genome"
 params.threads = 4
+params.minio_bucket = "genomics"
+params.minio_prefix = "reference_genome"
 
 def GENOME_URLS = [
     "hg38": "https://ftp.ensembl.org/pub/current_fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz",
+    "hg38-test": "https://ftp.ensembl.org/pub/current_fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.chromosome.21.fa.gz",
     "hg19": "https://hgdownload.soe.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz"
 ]
 
@@ -25,6 +28,23 @@ workflow {
     
     // Download and prepare genome
     download_and_prepare_genome(url, params.genome_id)
+    
+    // Upload to MinIO
+    upload_to_minio(
+        download_and_prepare_genome.out.bgzip_fasta,
+        download_and_prepare_genome.out.fai_index,
+        download_and_prepare_genome.out.gzi_index,
+        download_and_prepare_genome.out.strobealign_index,
+        params.genome_id
+    )
+    
+    // Emit workflow outputs
+    emit:
+        bgzip_fasta = upload_to_minio.out.bgzip_fasta_url
+        fai_index = upload_to_minio.out.fai_index_url
+        gzi_index = upload_to_minio.out.gzi_index_url
+        strobealign_index = upload_to_minio.out.strobealign_index_url
+        results = download_and_prepare_genome.out.results
 }
 
 process download_and_prepare_genome {
@@ -81,10 +101,12 @@ process download_and_prepare_genome {
     echo "🎯 Creating Strobealign index (general genome index)..."
     strobealign -i -r 150 "${params.output_dir}/${genome_id}.fa.gz"
     
-    # Rename strobealign index to standard name
+    # Rename strobealign index from .r150.sti to .sti
     if [ -f "${params.output_dir}/${genome_id}.fa.gz.r150.sti" ]; then
         mv "${params.output_dir}/${genome_id}.fa.gz.r150.sti" "${params.output_dir}/${genome_id}.fa.gz.sti"
         echo "✅ Strobealign index created (renamed .r150.sti to .sti)"
+    else
+        echo "⚠️  STI file not found with expected name pattern"
     fi
            
     # Copy files to work directory for Nextflow output
@@ -113,6 +135,89 @@ process download_and_prepare_genome {
     echo "✅ PIPELINE 1 COMPLETE"
     echo "📁 Output: ${params.output_dir}"
     echo "📄 Results: ${genome_id}_prep_results.txt"
+    """
+}
+
+process upload_to_minio {
+    tag "Upload ${genome_id} to MinIO"
+    
+    input:
+        path bgzip_fasta
+        path fai_index
+        path gzi_index
+        path strobealign_index
+        val genome_id
+    
+    output:
+        path "bgzip_fasta_url", emit: bgzip_fasta_url
+        path "fai_index_url", emit: fai_index_url
+        path "gzi_index_url", emit: gzi_index_url
+        path "strobealign_index_url", emit: strobealign_index_url
+    
+    script:
+    """
+    set -e
+    
+    # Send info messages to stderr, URLs to stdout
+    echo "☁️ Uploading ${genome_id} files to MinIO..." >&2
+    
+    # Configure mc alias if not already configured
+    if ! mc alias list | grep -q "genomics"; then
+        echo "Configuring mc alias..." >&2
+        mc alias set genomics http://\${MINIO_ENDPOINT:-minio:9000} \${MINIO_ACCESS_KEY:-genomics} \${MINIO_SECRET_KEY:-genomics} > /dev/null 2>&1
+    fi
+    
+    # Ensure bucket exists
+    mc mb -p genomics/${params.minio_bucket} > /dev/null 2>&1 || true
+    
+    # Initialize URL variables
+    bgzip_url=""
+    fai_url=""
+    gzi_url=""
+    sti_url=""
+    
+    # Upload each file
+    for file_path in "$bgzip_fasta" "$fai_index" "$gzi_index" "$strobealign_index"; do
+        if [ -f "\$file_path" ]; then
+            filename=\$(basename "\$file_path")
+            object_name="${params.minio_prefix}/${genome_id}/\$filename"
+            echo "Uploading \$filename..." >&2
+            # Suppress all mc output, only show errors if they occur
+            if ! mc cp "\$file_path" "genomics/${params.minio_bucket}/\$object_name" > /dev/null 2>&1; then
+                echo "❌ Failed to upload \$filename" >&2
+                exit 1
+            fi
+            url="s3://${params.minio_bucket}/\$object_name"
+            
+            # Store URL based on file type
+            if [[ "\$filename" == *".fa.gz" && ! "\$filename" == *".fai" && ! "\$filename" == *".gzi" && ! "\$filename" == *".sti" ]]; then
+                bgzip_url="\$url"
+            elif [[ "\$filename" == *".fa.gz.fai" ]]; then
+                fai_url="\$url"
+            elif [[ "\$filename" == *".fa.gz.gzi" ]]; then
+                gzi_url="\$url"
+            elif [[ "\$filename" == *".fa.gz.sti" ]]; then
+                sti_url="\$url"
+            fi
+            echo "✅ Uploaded: \$url" >&2
+        else
+            echo "⚠️ File not found: \$file_path" >&2
+        fi
+    done
+    
+    # Ensure all variables have values (even if empty strings)
+    bgzip_url="\${bgzip_url:-}"
+    fai_url="\${fai_url:-}"
+    gzi_url="\${gzi_url:-}"
+    sti_url="\${sti_url:-}"
+    
+    # Write each URL to its own file (Nextflow will capture these files)
+    echo "\$bgzip_url" > bgzip_fasta_url
+    echo "\$fai_url" > fai_index_url
+    echo "\$gzi_url" > gzi_index_url
+    echo "\$sti_url" > strobealign_index_url
+    
+    echo "✅ Upload completed" >&2
     """
 }
 

@@ -425,7 +425,7 @@ export function SettingsSection() {
                 }
               >
                 {referenceGenomes.map((g) => (
-                  <option key={g.id} value={g.id}>
+                  <option key={g.id} value={g.id} className={indexedStatus[pipelineConfig.referenceGenome] ? 'bg-green-100 text-green-800' : ''}>
                     {g.label}
                   </option>
                 ))}
@@ -476,7 +476,7 @@ export function SettingsSection() {
                 {indexLogs.length > 0 && (
                   <div 
                     ref={logsContainerRef}
-                    className="text-xs bg-muted p-2 rounded-md max-h-32 overflow-y-auto font-mono"
+                    className="text-xs bg-muted p-2 rounded-md overflow-y-auto font-mono"
                   >
                     {indexLogs.map((log, i) => (
                       <div key={i}>{log}</div>
