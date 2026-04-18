@@ -31,4 +31,4 @@ export interface VariantCallerOption {
   label: string
 }
 
-export type SettingsSectionPipelineConfigKey = 'defaults' | 'lowQuality' | 'clinical' | 'population'
+export type AlignGenomeSectionPipelineConfigKey = 'defaults' | 'lowQuality' | 'clinical' | 'population'

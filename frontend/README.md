@@ -5,12 +5,22 @@ Next.js frontend for the AI Genomics Lab, providing real-time monitoring and man
 ## Overview
 
 The frontend provides an intuitive interface for:
+- **Secure Authentication**: Login with JWT tokens, role-based access control
+- **Settings Management**: Comprehensive platform configuration with permission-based access
+- **Storage Integration**: MinIO object storage management for genome files
 - Monitoring genome indexing progress in real-time
 - Managing reference genome indices (index, re-index, delete)
 - Viewing system infrastructure status
 - Visualizing genomic data and analysis results
 
 ## Features
+
+### 🔐 **Authentication & Settings Management**
+- **Secure Login**: JWT-based authentication with token management
+- **Role-Based Access**: Admin, analyst, researcher, viewer roles with appropriate permissions
+- **Settings Dashboard**: Comprehensive configuration interface with 7 tabs
+- **Permission Enforcement**: Granular control over who can edit each settings area
+- **MinIO Storage Integration**: Connect to object storage for genome file management
 
 ### 🚀 **Real-time Genome Indexing Interface**
 - **Live progress monitoring**: Server-Sent Events (SSE) streaming with auto-scrolling logs
@@ -109,6 +119,10 @@ npm run dev
 
 The application will be available at http://localhost:3000
 
+**Note**: Ensure the API backend is running (default: http://localhost:8000). On first startup, the database is automatically seeded with default admin credentials:
+- **Email**: `admin@company.com`
+- **Password**: `admin123`
+
 ### Environment Variables
 Create `.env.local` in the frontend directory:
 ```env
@@ -197,6 +211,99 @@ console.log('Indexed Status:', indexedStatus);
 - `Select`: Dropdown for genome selection
 - `Input`: Form input components
 
+## Authentication & Settings
+
+The frontend now includes secure authentication and comprehensive settings management:
+
+### Login Page (`/login`)
+- **User Authentication**: Email/password login with JWT token management
+- **Session Management**: Automatic token refresh and logout functionality
+- **Security Features**: Secure HTTP-only cookies, password hashing, CSRF protection
+- **User Experience**: Form validation, error handling, remember me option
+
+### Settings Page (`/settings`)
+Organized into permission-based sections:
+
+#### Genome References
+- **Manage Reference Genomes**: Add, edit, delete genome references (admin only)
+- **URL Validation**: Whitelisted domains, file extension validation, size checking
+- **Test Connection**: Verify genome URL accessibility and integrity
+- **Visual Status**: Active/inactive indicators and indexing status
+
+#### Pipeline Configuration
+- **Parameter Management**: Edit pipeline settings (admin only)
+- **Validation**: Enum dropdowns, numeric ranges, required fields
+- **Real-time Saving**: Save/cancel functionality with confirmation
+
+#### AI Provider Settings
+- **Provider Selection**: OpenRouter, OpenAI, Anthropic support
+- **API Key Management**: Encrypted storage, masked display
+- **Connection Testing**: Verify API keys and provider connectivity
+- **Model Selection**: Choose appropriate LLM models for analysis
+
+#### User Preferences
+- **UI Customization**: Language, timezone, theme (light/dark/system)
+- **Display Options**: Customize interface elements and layouts
+- **User-specific**: Settings stored per user account
+
+#### System Management (Admin Only)
+- **Audit Logs**: Track configuration changes and user actions
+- **System Health**: Monitor service status and connectivity
+- **User Management**: Create, edit, and deactivate user accounts
+
+#### Storage Management
+- **MinIO Integration**: Connect to MinIO object storage for genome file management
+- **Genome Sync**: Synchronize local genomes to MinIO storage
+- **Status Tracking**: Monitor sync status for genome files
+- **Download Management**: Download genomes from MinIO to local storage
+
+### Security Implementation
+- **Role-Based Access Control (RBAC)**: Admin, analyst, researcher, viewer roles
+- **Permission Levels**: Granular control over who can edit each settings area
+- **Input Validation**: Comprehensive validation for all user inputs
+- **Password Security**: **Argon2** password hashing (modern, GPU/ASIC-resistant algorithm)
+- **API Security**: JWT authentication, rate limiting, SQL injection prevention
+
+### API Integration
+- **Authentication Endpoints**: `/api/auth/login`, `/api/auth/logout`, `/api/auth/refresh`
+- **Settings Endpoints**: Genome references, pipeline settings, AI providers, UI preferences, audit logs, system health
+- **Storage Endpoints**: `/storage/genomes`, `/storage/sync/genomes`, `/storage/genomes/{name}/status`, `/storage/genomes/{name}/download`
+- **Real-time Updates**: SSE for system health monitoring
+- **Error Handling**: Graceful degradation and user-friendly error messages
+
+### Default Credentials & Database Bootstrap
+
+When the application starts for the first time, the database is automatically seeded with:
+
+**Default Admin User:**
+- **Email**: `admin@company.com`
+- **Password**: `admin123`
+- **Roles**: `admin`, `analyst`, `researcher`, `viewer` (full permissions)
+
+**Initial Configuration:**
+- Pre-configured genome references (hg38, hg38-test, hg19)
+- Default pipeline settings with validation rules
+- Base roles and permission mappings
+- System-wide UI preferences
+
+**Database Initialization Process:**
+1. PostgreSQL database `genomics` is created with all required tables
+2. Tables for users, roles, genome references, pipeline settings, AI providers, UI preferences, and audit logs
+3. Data seeding runs automatically on first API startup
+4. Admin user is created with **Argon2-hashed password** (modern secure hashing)
+5. All configurations are ready for immediate use
+
+**Security Note:** The system uses **Argon2** for password hashing, which is currently the most secure password hashing algorithm, resistant to GPU and ASIC attacks.
+
+### Getting Started with Authentication
+1. **Initial Setup**: Database bootstrap creates admin user with credentials above
+2. **First Login**: Navigate to `/login` and use `admin@company.com` / `admin123`
+3. **Session Management**: JWT tokens automatically refresh; logout via `/logout`
+4. **User Management**: Admin can create additional users with appropriate roles via Settings → User Management
+5. **Configuration**: Set up genome references and pipeline parameters before analysis
+
+For detailed implementation plan, see [PLAN.md](./PLAN.md).
+
 ## Future Enhancements
 
 Planned improvements:
@@ -206,6 +313,9 @@ Planned improvements:
 - Advanced filtering and search for logs
 - Dark/light theme support
 - Mobile-responsive design improvements
+- Two-factor authentication
+- OAuth2/OpenID Connect support
+- Configuration versioning and import/export
 
 ## License
 

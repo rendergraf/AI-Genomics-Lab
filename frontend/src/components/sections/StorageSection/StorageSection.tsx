@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { HardDrive, Upload, Download, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
 import { Area } from '@/components/ui/Area'
 import { Button } from '@/components/ui'
+import { Alert } from '@/components/ui/Alert'
+import api from '@/lib/api'
 
 interface GenomeFile {
   object: string
@@ -45,37 +47,113 @@ export function StorageSection() {
   const [isLoading, setIsLoading] = useState(true)
   const [syncResult, setSyncResult] = useState<any>(null)
   const [activeTab, setActiveTab] = useState<'genomes' | 'status'>('genomes')
-
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
+  const [authError, setAuthError] = useState<string | null>(null)
 
   useEffect(() => {
     loadGenomes()
   }, [])
 
   const loadGenomes = async () => {
+    setAuthError(null)
+    const token = api.getToken()
+    if (!token) {
+      console.warn('No access token found in localStorage')
+      setAuthError('No authentication token found. Please login again.')
+      setIsLoading(false)
+      return
+    }
     try {
-      const response = await fetch(`${API_URL}/storage/genomes`)
-      if (response.ok) {
-        const data = await response.json()
-        setGenomes(data.genomes)
+      // Try new MinIO endpoint first
+      const result = await api.listFilesInBucket('reference')
+      if (result.data) {
+        // Group files by genome
+        const genomeMap: Record<string, Genome> = {}
+        
+        for (const file of result.data.files) {
+          // Extract genome name from object path: reference_genome/{genome_name}/{file}
+          const parts = file.object_name.split('/')
+          if (parts.length >= 3 && parts[0] === 'reference_genome') {
+            const genomeName = parts[1]
+            const fileName = parts.slice(2).join('/')
+            
+            if (!genomeMap[genomeName]) {
+              genomeMap[genomeName] = {
+                name: genomeName,
+                files: [],
+                total_size: 0,
+                has_fasta: false,
+                has_fai: false,
+                has_sti: false
+              }
+            }
+            
+            const genome = genomeMap[genomeName]
+            const fileType = fileName.endsWith('.fa.gz') ? 'fasta' : 
+                            fileName.endsWith('.fa.gz.fai') ? 'fai' :
+                            fileName.endsWith('.fa.gz.gzi') ? 'gzi' :
+                            fileName.endsWith('.fa.gz.sti') ? 'sti' : 'other'
+            
+            genome.files.push({
+              object: file.object_name,
+              size: file.size,
+              type: fileType
+            })
+            genome.total_size += file.size
+            
+            if (fileType === 'fasta') genome.has_fasta = true
+            if (fileType === 'fai') genome.has_fai = true
+            if (fileType === 'sti') genome.has_sti = true
+          }
+        }
+        
+        const genomes = Object.values(genomeMap)
+        setGenomes(genomes)
         
         // Load status for each genome
         const statuses: Record<string, SyncStatus> = {}
-        for (const genome of data.genomes) {
+        for (const genome of genomes) {
           try {
-            const statusResponse = await fetch(`${API_URL}/storage/genomes/${genome.name}/status`)
-            if (statusResponse.ok) {
-              const status = await statusResponse.json()
-              statuses[genome.name] = status
+            const statusResult = await api.getGenomeStatus(genome.name)
+            if (statusResult.data) {
+              statuses[genome.name] = statusResult.data
             }
           } catch (error) {
             console.error(`Error loading status for ${genome.name}:`, error)
           }
         }
         setSyncStatus(statuses)
+      } else {
+        console.error('Error loading MinIO files:', result.error)
+        setAuthError(result.error || 'Failed to load files from MinIO')
       }
     } catch (error) {
-      console.error('Error loading genomes:', error)
+      console.error('Error loading MinIO files:', error)
+      // Fallback to old endpoint
+      try {
+        const result = await api.getStorageGenomes()
+        if (result.data) {
+          setGenomes(result.data.genomes)
+          
+          const statuses: Record<string, SyncStatus> = {}
+          for (const genome of result.data.genomes) {
+            try {
+              const statusResult = await api.getGenomeStatus(genome.name)
+              if (statusResult.data) {
+                statuses[genome.name] = statusResult.data
+              }
+            } catch (error) {
+              console.error(`Error loading status for ${genome.name}:`, error)
+            }
+          }
+          setSyncStatus(statuses)
+        } else {
+          console.error('Error loading genomes:', result.error)
+          setAuthError(result.error || 'Failed to load genomes')
+        }
+      } catch (fallbackError) {
+        console.error('Fallback error:', fallbackError)
+        setAuthError('Network error loading genomes')
+      }
     } finally {
       setIsLoading(false)
     }
@@ -86,18 +164,22 @@ export function StorageSection() {
     setSyncResult(null)
     
     try {
-      const response = await fetch(`${API_URL}/storage/sync/genomes`, {
-        method: 'POST'
-      })
-      
-      const result = await response.json()
-      setSyncResult(result)
-      
-      if (result.success) {
-        // Reload genomes after sync
-        setTimeout(() => {
-          loadGenomes()
-        }, 1000)
+      const result = await api.syncStorageGenomes()
+      if (result.data) {
+        setSyncResult(result.data)
+        
+        if (result.data.success) {
+          // Reload genomes after sync
+          setTimeout(() => {
+            loadGenomes()
+          }, 1000)
+        }
+      } else {
+        console.error('Error syncing to MinIO:', result.error)
+        setSyncResult({
+          success: false,
+          error: result.error || 'Sync failed'
+        })
       }
     } catch (error) {
       console.error('Error syncing to MinIO:', error)
@@ -112,25 +194,41 @@ export function StorageSection() {
 
   const handleDownloadGenome = async (genomeName: string) => {
     try {
-      const response = await fetch(`${API_URL}/storage/genomes/${genomeName}/download`, {
-        method: 'POST'
-      })
-      
-      const result = await response.json()
-      alert(`Download results for ${genomeName}:\nSuccess: ${result.success}\nDownloaded: ${result.downloaded}\nSkipped: ${result.skipped}\nFailed: ${result.failed}`)
-      
-      // Reload status
-      const statusResponse = await fetch(`${API_URL}/storage/genomes/${genomeName}/status`)
-      if (statusResponse.ok) {
-        const status = await statusResponse.json()
-        setSyncStatus(prev => ({
-          ...prev,
-          [genomeName]: status
-        }))
+      const result = await api.downloadGenome(genomeName)
+      if (result.data) {
+        alert(`Download results for ${genomeName}:\nSuccess: ${result.data.success}\nDownloaded: ${result.data.downloaded}\nSkipped: ${result.data.skipped}\nFailed: ${result.data.failed}`)
+        
+        // Reload status
+        const statusResult = await api.getGenomeStatus(genomeName)
+        if (statusResult.data) {
+          setSyncStatus(prev => ({
+            ...prev,
+            [genomeName]: statusResult.data
+          }))
+        }
+      } else {
+        console.error(`Error downloading ${genomeName}:`, result.error)
+        alert(`Failed to download ${genomeName}: ${result.error}`)
       }
     } catch (error) {
       console.error(`Error downloading ${genomeName}:`, error)
       alert(`Failed to download ${genomeName}`)
+    }
+  }
+
+  const handleDownloadFile = async (objectName: string) => {
+    try {
+      const result = await api.generatePresignedUrl('reference', objectName)
+      if (result.data && result.data.presigned_url) {
+        // Open the presigned URL in a new tab to download the file
+        window.open(result.data.presigned_url, '_blank')
+      } else {
+        console.error('Error generating presigned URL:', result.error)
+        alert('Failed to generate download link')
+      }
+    } catch (error) {
+      console.error('Error downloading file:', error)
+      alert('Failed to download file')
     }
   }
 
@@ -206,6 +304,12 @@ export function StorageSection() {
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-semibold">Storage Management</h2>
+
+      {authError && (
+        <Alert variant="error">
+          {authError}
+        </Alert>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b">
@@ -336,14 +440,23 @@ export function StorageSection() {
 
                   <div className="text-xs">
                     <div className="font-medium mb-1">Files:</div>
-                    <div className="space-y-1 max-h-24 overflow-y-auto">
-                      {genome.files.map((file, idx) => (
-                        <div key={idx} className="flex justify-between items-center py-1 border-b">
-                          <span className="truncate">{file.object}</span>
-                          <span className="text-muted-foreground">{formatFileSize(file.size)}</span>
-                        </div>
-                      ))}
-                    </div>
+                     <div className="space-y-1 max-h-24 overflow-y-auto">
+                       {genome.files.map((file, idx) => (
+                         <div key={idx} className="flex justify-between items-center py-1 border-b">
+                           <span className="truncate">{file.object}</span>
+                           <div className="flex items-center gap-2">
+                             <span className="text-muted-foreground">{formatFileSize(file.size)}</span>
+                             <button
+                               onClick={() => handleDownloadFile(file.object)}
+                               className="p-1 text-blue-600 hover:text-blue-800"
+                               title="Download file"
+                             >
+                               <Download className="h-3 w-3" />
+                             </button>
+                           </div>
+                         </div>
+                       ))}
+                     </div>
                   </div>
                 </div>
               ))}

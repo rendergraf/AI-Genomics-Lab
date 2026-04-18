@@ -16,14 +16,14 @@ import type {
   ServiceConnection,
   ReferenceGenomeOption,
   VariantCallerOption,
-  SettingsSectionPipelineConfigKey,
-} from './SettingsSection.types'
+  AlignGenomeSectionPipelineConfigKey,
+} from './AlignGenomeSection.types'
 
 /* =========================================================
    🧩 SERVICES LAYER
 ========================================================= */
 
-export const SETTINGS_SECTION_SERVICES: ServiceConnection[] = [
+export const ALIGN_GENOME_SECTION_SERVICES: ServiceConnection[] = [
   { name: 'Neo4j', icon: Database, status: 'connected' },
   { name: 'PostgreSQL', icon: HardDrive, status: 'connected' },
   { name: 'MinIO', icon: FolderOpen, status: 'connected' },
@@ -85,7 +85,7 @@ export const REFERENCE_GENOMES: ReferenceGenome[] = [
    🎛 UI OPTIONS (DERIVED FROM REGISTRY)
 ========================================================= */
 
-export const SETTINGS_SECTION_REFERENCE_GENOMES: ReferenceGenomeOption[] =
+export const ALIGN_GENOME_SECTION_REFERENCE_GENOMES: ReferenceGenomeOption[] =
   REFERENCE_GENOMES.map((g) => ({
     value: g.id,
     label: `${g.id} (${g.assembly})`,
@@ -95,7 +95,7 @@ export const SETTINGS_SECTION_REFERENCE_GENOMES: ReferenceGenomeOption[] =
    🧬 VARIANT CALLERS
 ========================================================= */
 
-export const SETTINGS_SECTION_VARIANT_CALLERS: VariantCallerOption[] = [
+export const ALIGN_GENOME_SECTION_VARIANT_CALLERS: VariantCallerOption[] = [
   { value: 'bcftools', label: 'bcftools (fast)' },
   { value: 'gatk', label: 'GATK (clinical-grade)' },
   { value: 'freebayes', label: 'FreeBayes (population)' },
@@ -105,8 +105,8 @@ export const SETTINGS_SECTION_VARIANT_CALLERS: VariantCallerOption[] = [
    ⚙️ PIPELINE CONFIGS (BIOINFORMATICS PROFILES)
 ========================================================= */
 
-export const SETTINGS_SECTION_PIPELINE_CONFIGS: Record<
-  SettingsSectionPipelineConfigKey,
+export const ALIGN_GENOME_SECTION_PIPELINE_CONFIGS: Record<
+  AlignGenomeSectionPipelineConfigKey,
   PipelineConfig
 > = {
   defaults: {
@@ -143,13 +143,13 @@ export const SETTINGS_SECTION_PIPELINE_CONFIGS: Record<
 ========================================================= */
 
 export const SETTINGS_SECTION_DATA = {
-  services: SETTINGS_SECTION_SERVICES,
+  services: ALIGN_GENOME_SECTION_SERVICES,
 
-  referenceGenomes: SETTINGS_SECTION_REFERENCE_GENOMES,
+  referenceGenomes: ALIGN_GENOME_SECTION_REFERENCE_GENOMES,
   referenceGenomeRegistry: REFERENCE_GENOMES,
 
-  variantCallers: SETTINGS_SECTION_VARIANT_CALLERS,
+  variantCallers: ALIGN_GENOME_SECTION_VARIANT_CALLERS,
 
-  pipelineConfigs: SETTINGS_SECTION_PIPELINE_CONFIGS,
-  defaults: SETTINGS_SECTION_PIPELINE_CONFIGS.defaults,
+  pipelineConfigs: ALIGN_GENOME_SECTION_PIPELINE_CONFIGS,
+  defaults: ALIGN_GENOME_SECTION_PIPELINE_CONFIGS.defaults,
 } as const

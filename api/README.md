@@ -1,21 +1,50 @@
-# 🧬 AI Genomics Lab - Genome Indexing API
+# 🧬 AI Genomics Lab - API Service
 
-FastAPI-based service for downloading and indexing reference genomes for bioinformatics analysis.
+FastAPI-based service for the AI Genomics Lab platform, providing authentication, settings management, genome indexing, and bioinformatics pipeline orchestration.
 
 ## Overview
 
-The Genome Indexing API is a streamlined service that provides a single endpoint to download and index reference genomes from public sources (Ensembl/UCSC). It uses Nextflow workflows to create optimized genome indices for high-performance bioinformatics pipelines.
+The AI Genomics Lab API is a comprehensive service that provides:
+- **Secure Authentication**: JWT-based authentication with Argon2 password hashing and role-based access control
+- **Settings Management**: Platform configuration with permission-based access (genome references, pipeline settings, AI providers, UI preferences)
+- **Genome Indexing**: Download and index reference genomes from public sources (Ensembl/UCSC) using Nextflow workflows
+- **Bioinformatics Pipeline**: Orchestration of BWA, SAMtools, bcftools pipelines for genomic analysis
+- **Storage Integration**: MinIO object storage for genome file management
+- **Graph Database Access**: Neo4j integration for knowledge graph queries
+- **Real-time Monitoring**: Server-Sent Events (SSE) streaming for pipeline progress tracking
 
 ## Features
 
+### Authentication & Security
+- **JWT-based Authentication**: Secure token-based authentication with configurable expiration
+- **Argon2 Password Hashing**: Modern, GPU/ASIC-resistant password hashing algorithm
+- **Role-Based Access Control (RBAC)**: Admin, analyst, researcher, viewer roles with granular permissions
+- **Audit Logging**: Comprehensive logging of authentication events and configuration changes
+
+### Settings Management
+- **Genome References**: Manage reference genome URLs with validation and test functionality (admin only)
+- **Pipeline Configuration**: Configure bioinformatics pipeline parameters (admin only)
+- **AI Provider Settings**: Manage LLM API keys and provider configurations
+- **UI Preferences**: User-specific interface customization (theme, language, timezone)
+- **System Health Monitoring**: Real-time service status monitoring
+
+### Genome Indexing
 - **Multi-genome support**: hg38, hg38-test (chromosome 21), and hg19
 - **Complete indexing**: BGZF compression, FASTA index, BGZF index, Strobealign index
 - **Real-time monitoring**: Server-Sent Events (SSE) streaming with stage detection and heartbeat events
 - **Persistent state management**: PostgreSQL-backed job tracking with status history
 - **Genome status tracking**: API endpoints to check indexing status for all genomes
 - **Index management**: Delete index files and re-index genomes as needed
+
+### Storage Integration
+- **MinIO Object Storage**: Store and manage genome files in object storage
+- **Sync Capabilities**: Synchronize local genomes to MinIO storage
+- **Status Tracking**: Monitor sync status for genome files
+
+### Infrastructure
 - **Containerized execution**: Runs in Docker with isolated environments
 - **Production-ready**: Health checks, CORS support, OpenAPI documentation, timeout handling
+- **Database Integration**: PostgreSQL for relational data, Neo4j for graph data
 
 ## Installation
 
@@ -70,6 +99,133 @@ curl http://localhost:8000/health
   "storage": "ok"
 }
 ```
+
+### Authentication Endpoints
+
+#### POST `/api/auth/login`
+**User login** - Authenticate user and return JWT tokens
+
+**Parameters** (JSON):
+- `email` (required): User email address
+- `password` (required): User password
+- `remember_me` (optional): Boolean for extended session
+
+**Response**:
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "expires_in": 1800
+}
+```
+
+**Example**:
+```bash
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@company.com","password":"admin123","remember_me":false}'
+```
+
+#### POST `/api/auth/logout`
+**User logout** - Logout user and cleanup session (requires authentication)
+
+**Headers**:
+- `Authorization: Bearer {access_token}`
+
+**Example**:
+```bash
+curl -X POST http://localhost:8000/api/auth/logout \
+  -H "Authorization: Bearer {access_token}"
+```
+
+#### GET `/api/auth/me`
+**Get current user** - Get information about authenticated user (requires authentication)
+
+**Headers**:
+- `Authorization: Bearer {access_token}`
+
+**Response**:
+```json
+{
+  "id": 1,
+  "email": "admin@company.com",
+  "name": "Administrator",
+  "is_active": true,
+  "roles": ["admin"]
+}
+```
+
+#### POST `/api/auth/refresh`
+**Refresh token** - Get new access token using refresh token
+
+**Parameters** (JSON):
+- `refresh_token` (required): Valid refresh token
+
+**Response**:
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### Settings Endpoints (Authenticated)
+
+All settings endpoints require authentication and appropriate permissions.
+
+#### Genome References (`/api/settings/genome-references`)
+- **GET**: Get all genome references (admin only)
+- **POST**: Create new genome reference (admin only)
+- **PUT** `/{id}`: Update genome reference (admin only)
+- **DELETE** `/{id}`: Delete genome reference (admin only)
+- **POST** `/test`: Test genome URL accessibility
+
+#### Pipeline Settings (`/api/settings/pipeline`)
+- **GET**: Get pipeline configuration (admin only)
+- **PUT** `/{key}`: Update specific pipeline setting (admin only)
+
+#### AI Provider Settings (`/api/settings/ai-providers`)
+- **GET**: Get AI provider configurations
+- **POST**: Create AI provider configuration
+- **PUT** `/{id}`: Update AI provider configuration
+- **DELETE** `/{id}`: Delete AI provider configuration
+- **POST** `/test`: Test AI provider connection
+
+#### UI Preferences (`/api/settings/ui-preferences`)
+- **GET**: Get user UI preferences
+- **PUT**: Update user UI preferences
+
+#### System Management
+- **GET** `/api/settings/audit-logs`: View audit logs (admin only)
+- **GET** `/api/settings/system-health`: Get system health status
+
+### Storage Endpoints (Authenticated)
+
+#### GET `/storage/genomes`
+**List genomes from MinIO** - List all genomes available in MinIO storage
+
+**Headers**:
+- `Authorization: Bearer {access_token}`
+
+**Response**: List of genomes with metadata
+
+#### POST `/storage/sync/genomes`
+**Sync local genomes to MinIO** - Synchronize local genome files to object storage
+
+**Headers**:
+- `Authorization: Bearer {access_token}`
+
+#### GET `/storage/genomes/{genome_name}/status`
+**Get sync status** - Get synchronization status for a specific genome
+
+**Headers**:
+- `Authorization: Bearer {access_token}`
+
+#### POST `/storage/genomes/{genome_name}/download`
+**Download genome from MinIO** - Download genome files from MinIO to local storage
+
+**Headers**:
+- `Authorization: Bearer {access_token}`
 
 ### POST `/genome/index`
 **Genome indexing** - Download and index a reference genome
@@ -304,6 +460,10 @@ The API implements advanced state management and real-time monitoring capabiliti
 | `MINIO_ACCESS_KEY` | MinIO access key | `genomics` |
 | `MINIO_SECRET_KEY` | MinIO secret key | `genomics` |
 | `OPENROUTER_API_KEY` | OpenRouter API key for LLM | (required) |
+| `JWT_SECRET_KEY` | Secret key for JWT token signing | `your-secret-key-change-in-production` |
+| `JWT_ALGORITHM` | Algorithm for JWT token signing | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token expiration time in minutes | `30` |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token expiration time in days | `7` |
 
 ### Docker Services
 

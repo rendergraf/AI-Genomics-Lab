@@ -12,6 +12,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ../api:/app/api
+      - ../services:/app/services
       - ../bio-pipeline:/bio-pipeline
       - ../datasets:/datasets
       - datasets-logs:/datasets/logs
@@ -24,8 +26,19 @@ services:
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=genomics
       - MINIO_SECRET_KEY=genomics
+      # MinIO Buckets Configuration
+      - MINIO_BUCKET_FASTQ=fastq-files
+      - MINIO_BUCKET_BAM=bam-files
+      - MINIO_BUCKET_VCF=vcf-files
+      - MINIO_BUCKET_REPORTS=reports
+      - MINIO_BUCKET_ANNOTATIONS=annotations
+      - MINIO_BUCKET_REFERENCE=genomics
+      - MINIO_BUCKET_GENOMICS=genomics
       # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - NXF_WORK=/nextflow-work
+      - JWT_SECRET_KEY=your-secret-key-change-in-production
+      - MINIO_PUBLIC_ENDPOINT=localhost:9000
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
       - postgres
       - neo4j
@@ -82,9 +95,36 @@ services:
     environment:
       - MINIO_ROOT_USER=genomics
       - MINIO_ROOT_PASSWORD=genomics
+      - MINIO_SERVER_URL=http://localhost:9000
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
+    networks:
+      - genomics-network
+
+  # =======================
+  # MinIO Bucket Initialization
+  # =======================
+  minio-init:
+    image: minio/mc
+    container_name: ai-genomics-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Waiting for MinIO to be ready...';
+      sleep 10;
+      mc alias set myminio http://minio:9000 genomics genomics;
+      mc mb --ignore-existing myminio/fastq-files;
+      mc mb --ignore-existing myminio/bam-files;
+      mc mb --ignore-existing myminio/vcf-files;
+      mc mb --ignore-existing myminio/reports;
+      mc mb --ignore-existing myminio/annotations;
+      mc mb --ignore-existing myminio/reference-genomes;
+      mc mb --ignore-existing myminio/genomics;
+      echo 'MinIO buckets created successfully';
+      exit 0;
+      "
     networks:
       - genomics-network
 
@@ -115,6 +155,14 @@ services:
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=genomics
       - MINIO_SECRET_KEY=genomics
+      # MinIO Buckets Configuration
+      - MINIO_BUCKET_FASTQ=fastq-files
+      - MINIO_BUCKET_BAM=bam-files
+      - MINIO_BUCKET_VCF=vcf-files
+      - MINIO_BUCKET_REPORTS=reports
+      - MINIO_BUCKET_ANNOTATIONS=annotations
+      - MINIO_BUCKET_REFERENCE=genomics
+      - MINIO_BUCKET_GENOMICS=genomics
     networks:
       - genomics-network
 
@@ -135,6 +183,7 @@ services:
     environment:
       - NODE_ENV=development
       - API_HOST=ai-genomics-api
+      - NEXT_PUBLIC_API_URL=http://localhost:3000
     depends_on:
       - api
     networks:

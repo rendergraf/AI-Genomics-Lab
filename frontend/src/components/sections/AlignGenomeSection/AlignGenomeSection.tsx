@@ -71,7 +71,7 @@ const referenceGenomes: ReferenceGenomeOption[] = [
    ⚙️ COMPONENT
 ========================================================= */
 
-export function SettingsSection() {
+export function AlignGenomeSection() {
   const [pipelineConfig, setPipelineConfig] = useState<PipelineConfig>({
     referenceGenome: 'hg38',
   })
@@ -352,7 +352,7 @@ export function SettingsSection() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold">Settings</h2>
+      <h2 className="text-2xl font-semibold">Align Genome</h2>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* =========================

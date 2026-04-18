@@ -1,19 +1,19 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { SettingsSection, SETTINGS_SECTION_DATA } from "./index";
+import { AlignGenomeSection, SETTINGS_SECTION_DATA } from "./index";
 
 /**
- * SettingsSection Component Stories
+ * AlignGenomeSection Component Stories
  * 
- * Uses SettingsSection.data.ts model to avoid hardcoded values.
+ * Uses AlignGenomeSection.data.ts model to avoid hardcoded values.
  */
 const meta = {
-  title: "Components/SettingsSection",
-  component: SettingsSection,
+  title: "Components/AlignGenomeSection",
+  component: AlignGenomeSection,
   parameters: {
     layout: "padded",
   },
   tags: ["autodocs"],
-} satisfies Meta<typeof SettingsSection>;
+} satisfies Meta<typeof AlignGenomeSection>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;

@@ -9,6 +9,8 @@ Version: 0.1
 License: MIT
 """
 
+import sys
+
 import os
 import json
 import re
@@ -17,7 +19,7 @@ import logging
 import shutil
 from datetime import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Form, Path
+from fastapi import FastAPI, HTTPException, Form, Path, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from dotenv import load_dotenv
@@ -26,9 +28,24 @@ from dotenv import load_dotenv
 from services.nextflow_runner import get_nextflow_runner
 from services.database_service import get_database_service
 from services.minio_service import get_minio_service
+from services.auth_service import get_auth_service
+
+# Import Pydantic for request/response models
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, List, Dict, Any
+from fastapi import Depends, HTTPException, status, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+print("🐛 MODULE IMPORT STARTING...")
 
 # Load environment variables
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+logger.info("Starting API initialization...")
 
 
 
@@ -57,6 +74,179 @@ async def lifespan(app: FastAPI):
         print("📦 Database connection closed")
     except Exception as e:
         print(f"⚠️  Database close failed: {e}")
+
+
+# ==================== AUTHENTICATION MODELS & SECURITY ====================
+
+# Security scheme
+security = HTTPBearer()
+
+# Pydantic models
+class LoginRequest(BaseModel):
+    model_config = {'populate_by_name': True}
+    email: EmailStr
+    password: str
+    remember_me: bool = Field(False, alias='rememberMe')
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str
+    expires_in: int
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    name: Optional[str]
+    is_active: bool
+    roles: List[str]
+
+class GenomeReferenceRequest(BaseModel):
+    key: str
+    name: str
+    url: str
+    species: Optional[str] = None
+    build: Optional[str] = None
+    is_active: bool = True
+
+class GenomeReferenceResponse(BaseModel):
+    id: int
+    key: str
+    name: str
+    species: Optional[str]
+    build: Optional[str]
+    url: str
+    is_active: bool
+    created_by: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+class PipelineSettingUpdate(BaseModel):
+    setting_value: str
+    data_type: Optional[str] = None
+    validation_rules: Optional[str] = None
+    description: Optional[str] = None
+
+class AIProviderSettingCreate(BaseModel):
+    provider: str
+    model: str
+    api_key_encrypted: Optional[str] = None
+    base_url: Optional[str] = None
+    is_active: bool = True
+
+class AIProviderSettingUpdate(BaseModel):
+    api_key_encrypted: Optional[str] = None
+    base_url: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class UIPreferenceUpdate(BaseModel):
+    language: Optional[str] = None
+    timezone: Optional[str] = None
+    theme: Optional[str] = None
+    display_options: Optional[Dict[str, Any]] = None
+
+
+# Storage models
+class GenomeFile(BaseModel):
+    object: str
+    size: int
+    type: str
+    status: Optional[str] = None
+    reason: Optional[str] = None
+
+class Genome(BaseModel):
+    name: str
+    files: List[GenomeFile]
+    total_size: int
+    has_fasta: bool
+    has_fai: bool
+    has_sti: bool
+
+class SyncStatusFile(BaseModel):
+    source: str
+    object: Optional[str] = None
+    path: Optional[str] = None
+    size: int
+
+class SyncStatus(BaseModel):
+    name: str
+    minio: bool
+    database: bool
+    local: bool
+    files: List[SyncStatusFile]
+    status: str
+    db_status: Optional[str] = None
+    db_path: Optional[str] = None
+
+class SyncResponse(BaseModel):
+    success: bool
+    uploaded: Optional[int] = 0
+    skipped: Optional[int] = 0
+    failed: Optional[int] = 0
+    error: Optional[str] = None
+
+class DownloadResponse(BaseModel):
+    success: bool
+    downloaded: Optional[int] = 0
+    skipped: Optional[int] = 0
+    failed: Optional[int] = 0
+    error: Optional[str] = None
+
+# Dependency functions
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Security(security)
+) -> Dict[str, Any]:
+    """Get current user from JWT token"""
+    auth_service = get_auth_service()
+    token = credentials.credentials
+    payload = auth_service.verify_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+    
+    db_service = get_database_service()
+    user = await db_service.get_user(int(user_id))
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+        )
+    
+    roles = await auth_service.get_user_roles(user.id)
+    if roles is None:
+        roles = []
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "is_active": user.is_active,
+        "roles": roles
+    }
+
+async def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Require admin role"""
+    if "admin" not in current_user["roles"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions"
+        )
+    return current_user
+
+# ==================== FASTAPI APPLICATION ====================
+
 
 
 # Create FastAPI application
@@ -88,13 +278,15 @@ Quick Start:
     openapi_tags=[
         {"name": "Health", "description": "🩺 Health check endpoints"},
         {"name": "Genome", "description": "🧬 Genome indexing endpoints"},
+        {"name": "Authentication", "description": "🔐 User authentication and authorization"},
+        {"name": "Settings", "description": "⚙️ Platform configuration and management"},
     ]
 )
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://localhost:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -257,7 +449,7 @@ async def delete_genome_index(
     # Delete MinIO objects
     try:
         minio_service = get_minio_service()
-        bucket = "genomics"
+        bucket = minio_service.get_bucket("reference")
         prefix = f"reference_genome/{genome_id}"
         
         for filename in files_to_delete:
@@ -318,6 +510,8 @@ async def genome_index(
     
     db_service = get_database_service()
     nextflow_runner = get_nextflow_runner()
+    minio_service = get_minio_service()
+    reference_bucket = minio_service.get_bucket("reference")
     
     # Create pipeline job in database
     genome_info = REMOTE_GENOMES[genome_id]
@@ -354,7 +548,7 @@ async def genome_index(
                 genome_id=genome_id,
                 output_dir=None,  # Use temporary directory
                 job_id=str(pipeline_job.id),
-                minio_bucket="genomics",
+                minio_bucket=reference_bucket,
                 minio_prefix="reference_genome"
             )
             
@@ -452,7 +646,7 @@ async def genome_index(
                 # Create/update reference genome record in database with MinIO URLs
                 try:
                     minio_service = get_minio_service()
-                    bucket = "genomics"
+                    bucket = minio_service.get_bucket("reference")
                     prefix = f"reference_genome/{genome_id}"
                     
                     # Build MinIO URLs
@@ -526,6 +720,730 @@ async def genome_index(
     return StreamingResponse(generate_logs(), media_type="text/event-stream")
 
 
+# ==================== AUTHENTICATION ENDPOINTS ====================
+
+@app.post("/api/auth/login", tags=["Authentication"], summary="User login")
+async def login(
+    request: LoginRequest,
+    user_agent: Optional[str] = None
+):
+    """Authenticate user and return JWT tokens"""
+    auth_service = get_auth_service()
+    
+    # Get IP address (simplified - in production use request.client.host)
+    ip_address = None
+    
+    user = await auth_service.authenticate_user(request.email, request.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
+    
+    # Create login session
+    session = await auth_service.create_login_session(
+        user=user,
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+    
+    return session
+
+@app.post("/api/auth/refresh", tags=["Authentication"], summary="Refresh access token")
+async def refresh_token(request: RefreshTokenRequest):
+    """Refresh access token using refresh token"""
+    auth_service = get_auth_service()
+    
+    new_access_token = await auth_service.refresh_access_token(request.refresh_token)
+    if not new_access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token"
+        )
+    
+    return {"access_token": new_access_token, "token_type": "bearer"}
+
+@app.post("/api/auth/logout", tags=["Authentication"], summary="User logout")
+async def logout(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    user_agent: Optional[str] = None
+):
+    """Log user logout event"""
+    auth_service = get_auth_service()
+    await auth_service.logout(current_user["id"])
+    return {"message": "Logged out successfully"}
+
+@app.get("/api/auth/me", tags=["Authentication"], summary="Get current user info")
+async def get_current_user_info(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Get information about the currently authenticated user"""
+    return current_user
+
+# ==================== SETTINGS ENDPOINTS ====================
+
+# Genome References
+@app.get("/api/settings/genome-references", tags=["Settings"], summary="Get genome references")
+async def get_genome_references(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get all genome references"""
+    db_service = get_database_service()
+    references = await db_service.get_genome_references()
+    return [GenomeReferenceResponse(**ref.__dict__) for ref in references]
+
+@app.post("/api/settings/genome-references", tags=["Settings"], summary="Create genome reference")
+async def create_genome_reference(
+    request: GenomeReferenceRequest,
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Create a new genome reference (admin only)"""
+    db_service = get_database_service()
+    
+    # Check if key already exists
+    existing = await db_service.get_genome_reference_by_key(request.key)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Genome reference with key '{request.key}' already exists"
+        )
+    
+    # Create reference
+    reference = await db_service.create_genome_reference(
+        key=request.key,
+        name=request.name,
+        url=request.url,
+        species=request.species,
+        build=request.build,
+        is_active=request.is_active,
+        created_by=current_user["id"]
+    )
+    
+    # Log action
+    auth_service = get_auth_service()
+    await auth_service.log_auth_event(
+        user_id=current_user["id"],
+        action="create_genome_reference",
+        details={"key": request.key, "name": request.name}
+    )
+    
+    return GenomeReferenceResponse(**reference.__dict__)
+
+@app.post("/api/settings/genome-references/{ref_id}/test", tags=["Settings"], summary="Test genome reference URL")
+async def test_genome_reference(
+    ref_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Test genome reference URL connectivity and validity"""
+    db_service = get_database_service()
+    reference = await db_service.get_genome_reference(ref_id)
+    if not reference:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Genome reference not found"
+        )
+    
+    # TODO: Implement actual URL testing with HEAD request and validation
+    # For now, return mock response
+    return {
+        "url": reference.url,
+        "reachable": True,
+        "content_type": "application/gzip",
+        "content_length": 841000000,
+        "valid": True,
+        "message": "URL appears valid (mock response)"
+    }
+
+# Pipeline Settings
+@app.get("/api/settings/pipeline", tags=["Settings"], summary="Get pipeline settings")
+async def get_pipeline_settings(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get all pipeline settings"""
+    db_service = get_database_service()
+    settings = await db_service.get_pipeline_settings()
+    
+    # Convert to dictionary format for frontend
+    result = {}
+    for setting in settings:
+        result[setting.setting_key] = {
+            "value": setting.setting_value,
+            "data_type": setting.data_type,
+            "description": setting.description,
+            "validation_rules": setting.validation_rules
+        }
+    
+    return result
+
+@app.put("/api/settings/pipeline/{key}", tags=["Settings"], summary="Update pipeline setting")
+async def update_pipeline_setting(
+    key: str,
+    request: PipelineSettingUpdate,
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Update a pipeline setting (admin only)"""
+    db_service = get_database_service()
+    
+    setting = await db_service.update_pipeline_setting(
+        key=key,
+        setting_value=request.setting_value,
+        data_type=request.data_type,
+        validation_rules=request.validation_rules,
+        description=request.description
+    )
+    
+    if not setting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pipeline setting '{key}' not found"
+        )
+    
+    # Log action
+    auth_service = get_auth_service()
+    await auth_service.log_auth_event(
+        user_id=current_user["id"],
+        action="update_pipeline_setting",
+        details={"key": key, "value": request.setting_value}
+    )
+    
+    return {
+        "key": setting.setting_key,
+        "value": setting.setting_value,
+        "data_type": setting.data_type,
+        "description": setting.description
+    }
+
+# AI Provider Settings
+@app.get("/api/settings/ai-providers", tags=["Settings"], summary="Get AI provider settings")
+async def get_ai_provider_settings(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get all AI provider settings"""
+    db_service = get_database_service()
+    settings = await db_service.get_ai_provider_settings()
+    
+    # Return without exposing encrypted API keys
+    result = []
+    for setting in settings:
+        result.append({
+            "provider": setting.provider,
+            "model": setting.model,
+            "base_url": setting.base_url,
+            "is_active": setting.is_active,
+            "has_api_key": bool(setting.api_key_encrypted)
+        })
+    
+    return result
+
+@app.post("/api/settings/ai-providers/test", tags=["Settings"], summary="Test AI provider connection")
+async def test_ai_provider(
+    provider: str,
+    model: str,
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Test AI provider API connection (admin only)"""
+    db_service = get_database_service()
+    setting = await db_service.get_ai_provider_setting(provider, model)
+    if not setting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"AI provider setting not found for {provider}/{model}"
+        )
+    
+    # TODO: Implement actual API test with provided credentials
+    # For now, return mock response
+    return {
+        "provider": provider,
+        "model": model,
+        "reachable": True,
+        "valid": True,
+        "message": "Connection test successful (mock response)"
+    }
+
+# UI Preferences
+@app.get("/api/settings/ui-preferences", tags=["Settings"], summary="Get UI preferences")
+async def get_ui_preferences(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get UI preferences for current user"""
+    db_service = get_database_service()
+    preferences = await db_service.get_ui_preferences(current_user["id"])
+    
+    if not preferences:
+        # Return defaults
+        return {
+            "language": "en",
+            "timezone": "UTC",
+            "theme": "light",
+            "display_options": {}
+        }
+    
+    return {
+        "language": preferences.language,
+        "timezone": preferences.timezone,
+        "theme": preferences.theme,
+        "display_options": preferences.display_options
+    }
+
+@app.put("/api/settings/ui-preferences", tags=["Settings"], summary="Update UI preferences")
+async def update_ui_preferences(
+    request: UIPreferenceUpdate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Update UI preferences for current user"""
+    db_service = get_database_service()
+    
+    preferences = await db_service.update_ui_preferences(
+        user_id=current_user["id"],
+        language=request.language,
+        timezone=request.timezone,
+        theme=request.theme,
+        display_options=request.display_options
+    )
+    
+    return {
+        "language": preferences.language,
+        "timezone": preferences.timezone,
+        "theme": preferences.theme,
+        "display_options": preferences.display_options
+    }
+
+# System Health
+@app.get("/api/settings/system-health", tags=["Settings"], summary="Get system health status")
+async def get_system_health(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get system health information"""
+    db_service = get_database_service()
+    
+    try:
+        # Test database connection
+        stats = await db_service.get_statistics()
+        db_healthy = True
+    except Exception as e:
+        db_healthy = False
+        stats = {}
+    
+    # TODO: Test other services (MinIO, Neo4j, Nextflow)
+    
+    return {
+        "database": {
+            "healthy": db_healthy,
+            "stats": stats if db_healthy else None
+        },
+        "minio": {"healthy": True},  # Mock
+        "neo4j": {"healthy": True},  # Mock
+        "nextflow": {"healthy": True},  # Mock
+        "api": {"healthy": True},
+        "timestamp": datetime.now().isoformat()
+    }
+
+# Audit Logs
+@app.get("/api/settings/audit-logs", tags=["Settings"], summary="Get audit logs")
+async def get_audit_logs(
+    limit: int = 100,
+    offset: int = 0,
+    user_id: Optional[int] = None,
+    action: Optional[str] = None,
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Get audit logs (admin only)"""
+    db_service = get_database_service()
+    logs = await db_service.get_audit_logs(
+        limit=limit,
+        offset=offset,
+        user_id=user_id,
+        action=action
+    )
+    
+    # Format response
+    result = []
+    for log in logs:
+        result.append({
+            "id": log.id,
+            "user_id": log.user_id,
+            "action": log.action,
+            "resource_type": log.resource_type,
+            "resource_id": log.resource_id,
+            "details": log.details,
+            "ip_address": log.ip_address,
+            "user_agent": log.user_agent,
+            "created_at": log.created_at.isoformat() if log.created_at else None
+        })
+    
+    return result
+
+
+# ==================== STORAGE ENDPOINTS ====================
+
+@app.get("/storage/genomes", tags=["Storage"], summary="List genomes from MinIO storage")
+async def get_storage_genomes(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """List all genomes available in MinIO storage"""
+    minio_service = get_minio_service()
+    
+    try:
+        # List all objects with metadata in the reference genomes bucket
+        bucket_name = minio_service.get_bucket("reference")
+        objects = await minio_service.list_objects_with_info(bucket=bucket_name, prefix="")
+        
+        # Group objects by genome name (handling prefixes: genomes/ or reference_genome/)
+        genomes_map = {}
+        for obj in objects:
+            obj_name = obj["object_name"]
+            parts = obj_name.split('/')
+            
+            # Determine genome name based on prefix
+            genome_name = None
+            if len(parts) >= 2:
+                if parts[0] in ["genomes", "reference_genome"]:
+                    genome_name = parts[1]
+                else:
+                    # Treat first part as genome name (flat structure)
+                    genome_name = parts[0]
+            else:
+                # Single part object, treat as genome name (no files)
+                genome_name = parts[0] if parts else "unknown"
+            
+            if not genome_name:
+                continue
+            
+            if genome_name not in genomes_map:
+                genomes_map[genome_name] = []
+            
+            # Determine file type based on extension
+            ext = obj_name.split('.')[-1].lower() if '.' in obj_name else "unknown"
+            file_type = ext if ext in ['fa', 'fasta', 'fai', 'sti', 'gz', 'bgz', 'bam', 'cram', 'vcf'] else "unknown"
+            
+            genomes_map[genome_name].append({
+                "object": obj_name,
+                "size": obj["size"],
+                "type": file_type
+            })
+        
+        # Build response
+        genomes = []
+        for genome_name, files in genomes_map.items():
+            total_size = sum(f["size"] for f in files)
+            has_fasta = any(f["object"].endswith('.fa') or f["object"].endswith('.fasta') or f["object"].endswith('.fa.gz') for f in files)
+            has_fai = any(f["object"].endswith('.fai') for f in files)
+            has_sti = any(f["object"].endswith('.sti') for f in files)
+            
+            genomes.append({
+                "name": genome_name,
+                "files": files,
+                "total_size": total_size,
+                "has_fasta": has_fasta,
+                "has_fai": has_fai,
+                "has_sti": has_sti
+            })
+        
+        return {"genomes": genomes}
+    
+    except Exception as e:
+        logger.error(f"Error listing genomes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/storage/genomes/{genome_name}/status", tags=["Storage"], summary="Get sync status for a genome")
+async def get_genome_status(
+    genome_name: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get sync status for a specific genome (MinIO vs local vs database)"""
+    minio_service = get_minio_service()
+    db_service = get_database_service()
+    
+    # Check MinIO presence - search under both possible prefixes
+    minio_objects = []
+    for prefix in [f"genomes/{genome_name}/", f"reference_genome/{genome_name}/"]:
+        bucket_name = minio_service.get_bucket("reference")
+        objects = await minio_service.list_objects_with_info(bucket=bucket_name, prefix=prefix)
+        minio_objects.extend(objects)
+    minio_present = len(minio_objects) > 0
+    
+    # Check database presence
+    db_present = False
+    db_status = None
+    db_path = None
+    try:
+        ref_genome = await db_service.get_reference_genome_by_name(genome_name)
+        if ref_genome:
+            db_present = True
+            db_status = ref_genome.status
+            db_path = ref_genome.file_path
+    except Exception as e:
+        logger.warning(f"Error checking database for genome {genome_name}: {e}")
+    
+    # Check local filesystem presence
+    local_present = False
+    local_path = os.getenv("DATASETS_DIR", "/datasets")
+    genome_local_dir = os.path.join(local_path, "reference_genome", genome_name)
+    if os.path.exists(genome_local_dir):
+        # Check for any files
+        local_files = os.listdir(genome_local_dir)
+        local_present = len(local_files) > 0
+    
+    # Determine overall status
+    if minio_present and db_present and local_present:
+        status = "synced"
+    elif minio_present and not db_present and not local_present:
+        status = "minio_only"
+    elif not minio_present and db_present and local_present:
+        status = "local_only"
+    elif minio_present and db_present and not local_present:
+        status = "minio_db"
+    else:
+        status = "partial"
+    
+    # Build files list
+    files = []
+    for obj in minio_objects:
+        files.append({
+            "source": "minio",
+            "object": obj["object_name"],
+            "size": obj["size"]
+        })
+    
+    # Add local files if directory exists
+    if os.path.exists(genome_local_dir):
+        for filename in os.listdir(genome_local_dir):
+            filepath = os.path.join(genome_local_dir, filename)
+            if os.path.isfile(filepath):
+                files.append({
+                    "source": "local",
+                    "path": filepath,
+                    "size": os.path.getsize(filepath)
+                })
+    
+    return {
+        "name": genome_name,
+        "minio": minio_present,
+        "database": db_present,
+        "local": local_present,
+        "files": files,
+        "status": status,
+        "db_status": db_status,
+        "db_path": db_path
+    }
+
+
+@app.post("/storage/sync/genomes", tags=["Storage"], summary="Sync genomes between MinIO and local storage")
+async def sync_genomes(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Trigger sync of genomes from MinIO to local storage"""
+    minio_service = get_minio_service()
+    local_path = os.getenv("DATASETS_DIR", "/datasets")
+    ref_genome_dir = os.path.join(local_path, "reference_genome")
+    
+    uploaded = 0
+    skipped = 0
+    failed = 0
+    
+    try:
+        # Ensure MinIO bucket exists
+        bucket_name = minio_service.get_bucket("reference")
+        minio_service._ensure_bucket(bucket_name)
+        
+        # Check if local reference genome directory exists
+        if not os.path.exists(ref_genome_dir):
+            return {
+                "success": True,
+                "uploaded": 0,
+                "skipped": 0,
+                "failed": 0,
+                "error": f"Local reference genome directory not found: {ref_genome_dir}"
+            }
+        
+        # List local genomes
+        local_genomes = [d for d in os.listdir(ref_genome_dir) if os.path.isdir(os.path.join(ref_genome_dir, d))]
+        
+        for genome_name in local_genomes:
+            genome_dir = os.path.join(ref_genome_dir, genome_name)
+            # List files in genome directory
+            for filename in os.listdir(genome_dir):
+                filepath = os.path.join(genome_dir, filename)
+                if not os.path.isfile(filepath):
+                    continue
+                
+                # Check if file already exists in MinIO
+                minio_object_name = f"reference_genome/{genome_name}/{filename}"
+                exists = await minio_service.object_exists(bucket_name, minio_object_name)
+                if exists:
+                    skipped += 1
+                    continue
+                
+                # Upload file to MinIO
+                try:
+                    result = await minio_service.upload_file(filepath, bucket=bucket_name, object_name=minio_object_name)
+                    if result["status"] == "success":
+                        uploaded += 1
+                    else:
+                        failed += 1
+                        logger.error(f"Failed to upload {filepath}: {result['message']}")
+                except Exception as e:
+                    failed += 1
+                    logger.error(f"Error uploading {filepath}: {e}")
+        
+        return {
+            "success": True,
+            "uploaded": uploaded,
+            "skipped": skipped,
+            "failed": failed
+        }
+        
+    except Exception as e:
+        logger.error(f"Error during sync: {e}")
+        return {
+            "success": False,
+            "uploaded": uploaded,
+            "skipped": skipped,
+            "failed": failed,
+            "error": str(e)
+        }
+
+
+@app.post("/storage/genomes/{genome_name}/download", tags=["Storage"], summary="Download genome files from MinIO to local storage")
+async def download_genome(
+    genome_name: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Download genome files from MinIO to local storage"""
+    minio_service = get_minio_service()
+    local_path = os.getenv("DATASETS_DIR", "/datasets")
+    genome_local_dir = os.path.join(local_path, "reference_genome", genome_name)
+    
+    downloaded = 0
+    skipped = 0
+    failed = 0
+    
+    try:
+        # Ensure local directory exists
+        os.makedirs(genome_local_dir, exist_ok=True)
+        
+        # List objects for this genome in MinIO - check both prefixes
+        bucket_name = minio_service.get_bucket("reference")
+        objects = []
+        for prefix in [f"genomes/{genome_name}/", f"reference_genome/{genome_name}/"]:
+            objs = await minio_service.list_objects_with_info(bucket=bucket_name, prefix=prefix)
+            objects.extend(objs)
+        
+        for obj in objects:
+            object_name = obj["object_name"]
+            filename = os.path.basename(object_name)
+            local_filepath = os.path.join(genome_local_dir, filename)
+            
+            # Check if local file already exists and size matches
+            if os.path.exists(local_filepath) and os.path.getsize(local_filepath) == obj["size"]:
+                skipped += 1
+                continue
+            
+            # Download file from MinIO
+            try:
+                result = await minio_service.download_file(bucket_name, object_name, local_filepath)
+                if result["status"] == "success":
+                    downloaded += 1
+                else:
+                    failed += 1
+                    logger.error(f"Failed to download {object_name}: {result['message']}")
+            except Exception as e:
+                failed += 1
+                logger.error(f"Error downloading {object_name}: {e}")
+        
+        return {
+            "success": True,
+            "downloaded": downloaded,
+            "skipped": skipped,
+            "failed": failed
+        }
+        
+    except Exception as e:
+        logger.error(f"Error during download: {e}")
+        return {
+            "success": False,
+            "downloaded": downloaded,
+            "skipped": skipped,
+            "failed": failed,
+            "error": str(e)
+        }
+
+
+
+
+# Keep only essential endpoints for viewing and downloading from MinIO
+
+print("🚀 REGISTERING NEW STORAGE ENDPOINTS...")
+logger.info("Registering endpoint: /storage/files/{bucket_type}")
+@app.get("/storage/test", tags=["Storage"], summary="Test endpoint")
+async def test_endpoint():
+    return {"message": "Storage test endpoint works"}
+
+@app.get("/storage/files/{bucket_type}", tags=["Storage"], summary="List files in MinIO bucket")
+async def list_files_in_bucket(
+    bucket_type: str,
+    prefix: str = "",
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """List files in a MinIO bucket"""
+    minio_service = get_minio_service()
+    bucket_name = minio_service.get_bucket(bucket_type)
+    
+    try:
+        objects = await minio_service.list_objects_with_info(bucket=bucket_name, prefix=prefix)
+        
+        # Format response
+        files = []
+        for obj in objects:
+            files.append({
+                "object_name": obj["object_name"],
+                "size": obj["size"],
+                "last_modified": obj["last_modified"],
+                "content_type": obj.get("content_type", ""),
+                "is_dir": obj.get("is_dir", False)
+            })
+        
+        return {
+            "bucket": bucket_name,
+            "bucket_type": bucket_type,
+            "prefix": prefix,
+            "file_count": len(files),
+            "files": files
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing files: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+logger.info("Registering endpoint: /storage/presigned-url/{bucket_type}/{object_name:path}")
+@app.get("/storage/presigned-url/{bucket_type}/{object_name:path}", tags=["Storage"], summary="Generate presigned URL for download")
+async def generate_presigned_url(
+    bucket_type: str,
+    object_name: str,
+    expires_seconds: int = 3600,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Generate a presigned URL for downloading a file from MinIO"""
+    minio_service = get_minio_service()
+    bucket_name = minio_service.get_bucket(bucket_type)
+    
+    try:
+        url = await minio_service.presigned_get_url(
+            bucket=bucket_name,
+            object_name=object_name,
+            expires_seconds=expires_seconds
+        )
+        
+        return {
+            "bucket": bucket_name,
+            "object_name": object_name,
+            "presigned_url": url,
+            "expires_seconds": expires_seconds
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating presigned URL: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

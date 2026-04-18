@@ -13,6 +13,7 @@ import os
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+import json
 from dataclasses import dataclass
 from enum import Enum
 
@@ -87,6 +88,103 @@ class PipelineJob:
     logs_path: Optional[str]
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
+    created_at: datetime
+
+
+@dataclass
+class User:
+    """User data model"""
+    id: int
+    email: str
+    password_hash: str
+    name: Optional[str]
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
+class Role:
+    """Role data model"""
+    id: int
+    name: str
+    description: Optional[str]
+
+
+@dataclass
+class UserRole:
+    """User-Role relationship"""
+    user_id: int
+    role_id: int
+
+
+@dataclass
+class GenomeReference:
+    """Genome reference data model (enhanced)"""
+    id: int
+    key: str
+    name: str
+    species: Optional[str]
+    build: Optional[str]
+    url: str
+    is_active: bool
+    created_by: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
+class PipelineSetting:
+    """Pipeline setting data model"""
+    id: int
+    setting_key: str
+    setting_value: str
+    data_type: str
+    validation_rules: Optional[str]
+    description: Optional[str]
+    created_by: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
+class AIProviderSetting:
+    """AI provider setting data model"""
+    id: int
+    provider: str
+    model: str
+    api_key_encrypted: Optional[str]
+    base_url: Optional[str]
+    is_active: bool
+    created_by: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
+class UIPreference:
+    """UI preference data model"""
+    id: int
+    user_id: int
+    language: str
+    timezone: str
+    theme: str
+    display_options: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
+class AuditLog:
+    """Audit log data model"""
+    id: int
+    user_id: Optional[int]
+    action: str
+    resource_type: Optional[str]
+    resource_id: Optional[int]
+    details: Dict[str, Any]
+    ip_address: Optional[str]
+    user_agent: Optional[str]
     created_at: datetime
 
 
@@ -182,7 +280,155 @@ class DatabaseService:
                 )
             """)
             
-            logger.info("Database schema initialized")
+            # Create users table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    email VARCHAR(255) NOT NULL UNIQUE,
+                    password_hash VARCHAR(255) NOT NULL,
+                    name VARCHAR(255),
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create roles table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS roles (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(50) NOT NULL UNIQUE,
+                    description TEXT
+                )
+            """)
+            
+            # Create user_roles junction table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_roles (
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE,
+                    PRIMARY KEY (user_id, role_id)
+                )
+            """)
+            
+            # Create genome_references table (enhanced version)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS genome_references (
+                    id SERIAL PRIMARY KEY,
+                    key VARCHAR(50) UNIQUE NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    species VARCHAR(100),
+                    build VARCHAR(50),
+                    url VARCHAR(512) NOT NULL,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_by INTEGER REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create pipeline_settings table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS pipeline_settings (
+                    id SERIAL PRIMARY KEY,
+                    setting_key VARCHAR(100) UNIQUE NOT NULL,
+                    setting_value TEXT NOT NULL,
+                    data_type VARCHAR(50) NOT NULL,
+                    validation_rules TEXT,
+                    description TEXT,
+                    created_by INTEGER REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create ai_provider_settings table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS ai_provider_settings (
+                    id SERIAL PRIMARY KEY,
+                    provider VARCHAR(50) NOT NULL,
+                    model VARCHAR(100) NOT NULL,
+                    api_key_encrypted TEXT,
+                    base_url VARCHAR(255),
+                    is_active BOOLEAN DEFAULT FALSE,
+                    created_by INTEGER REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create ui_preferences table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS ui_preferences (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    language VARCHAR(10) DEFAULT 'en',
+                    timezone VARCHAR(50) DEFAULT 'UTC',
+                    theme VARCHAR(20) DEFAULT 'light',
+                    display_options JSONB DEFAULT '{}',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create audit_logs table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    action VARCHAR(100) NOT NULL,
+                    resource_type VARCHAR(50),
+                    resource_id INTEGER,
+                    details JSONB DEFAULT '{}',
+                    ip_address INET,
+                    user_agent TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Seed initial roles if not exist
+            await conn.execute("""
+                INSERT INTO roles (name, description) 
+                VALUES 
+                    ('admin', 'Full system access'),
+                    ('analyst', 'Can analyze data and run pipelines'),
+                    ('researcher', 'Can view and query data'),
+                    ('viewer', 'Read-only access')
+                ON CONFLICT (name) DO NOTHING
+            """)
+            
+            # Seed admin user if not exist (password: admin123 - should be changed immediately)
+            await conn.execute("""
+                INSERT INTO users (email, password_hash, name, is_active) 
+                VALUES (
+                    'admin@company.com', 
+                    '$argon2id$v=19$m=65536,t=3,p=4$xNg7B0Bo7d1bS6l1bq31Xg$SeSzVI5vAzqeRnDKjh1zsKPeek3Vq6KpmktDgVDWbHU',  -- argon2 hash of 'admin123'
+                    'Administrator', 
+                    TRUE
+                ) 
+                ON CONFLICT (email) DO NOTHING
+            """)
+            
+            # Assign admin role to admin user
+            await conn.execute("""
+                INSERT INTO user_roles (user_id, role_id)
+                SELECT u.id, r.id 
+                FROM users u, roles r 
+                WHERE u.email = 'admin@company.com' AND r.name = 'admin'
+                ON CONFLICT (user_id, role_id) DO NOTHING
+            """)
+            
+            # Seed initial pipeline settings
+            await conn.execute("""
+                INSERT INTO pipeline_settings (setting_key, setting_value, data_type, description) 
+                VALUES 
+                    ('default_read_length', '150', 'integer', 'Default read length for alignment'),
+                    ('strobealign_r', '150', 'integer', 'Strobealign read length parameter'),
+                    ('max_threads', '32', 'integer', 'Maximum threads for pipeline execution')
+                ON CONFLICT (setting_key) DO NOTHING
+            """)
+            
+            logger.info("Database schema initialized with authentication and settings tables")
     
     # ==================== REFERENCE GENOMES ====================
     
@@ -455,21 +701,549 @@ class DatabaseService:
             row = await conn.fetchrow(query, *params)
             return PipelineJob(**dict(row)) if row else None
     
+    # ==================== USERS ====================
+    
+    async def create_user(
+        self,
+        email: str,
+        password_hash: str,
+        name: Optional[str] = None,
+        is_active: bool = True
+    ) -> User:
+        """Create a new user"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO users (email, password_hash, name, is_active)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id, email, password_hash, name, is_active, created_at, updated_at
+            """, email, password_hash, name, is_active)
+            
+            return User(**dict(row))
+    
+    async def get_user(self, user_id: int) -> Optional[User]:
+        """Get a user by ID"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, email, password_hash, name, is_active, created_at, updated_at
+                FROM users
+                WHERE id = $1
+            """, user_id)
+            
+            return User(**dict(row)) if row else None
+    
+    async def get_user_by_email(self, email: str) -> Optional[User]:
+        """Get a user by email"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, email, password_hash, name, is_active, created_at, updated_at
+                FROM users
+                WHERE email = $1
+            """, email)
+            
+            return User(**dict(row)) if row else None
+    
+    async def get_users(self) -> List[User]:
+        """Get all users"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, email, password_hash, name, is_active, created_at, updated_at
+                FROM users
+                ORDER BY created_at DESC
+            """)
+            
+            return [User(**dict(row)) for row in rows]
+    
+    async def update_user(
+        self,
+        user_id: int,
+        email: Optional[str] = None,
+        name: Optional[str] = None,
+        is_active: Optional[bool] = None
+    ) -> Optional[User]:
+        """Update user information"""
+        async with self.pool.acquire() as conn:
+            query = "UPDATE users SET updated_at = CURRENT_TIMESTAMP"
+            params = [user_id]
+            param_count = 1
+            
+            if email is not None:
+                param_count += 1
+                query += f", email = ${param_count}"
+                params.append(email)
+            
+            if name is not None:
+                param_count += 1
+                query += f", name = ${param_count}"
+                params.append(name)
+            
+            if is_active is not None:
+                param_count += 1
+                query += f", is_active = ${param_count}"
+                params.append(is_active)
+            
+            query += f" WHERE id = $1 RETURNING id, email, password_hash, name, is_active, created_at, updated_at"
+            
+            row = await conn.fetchrow(query, *params)
+            return User(**dict(row)) if row else None
+    
+    async def update_user_password(self, user_id: int, password_hash: str) -> bool:
+        """Update user password hash"""
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("""
+                UPDATE users 
+                SET password_hash = $2, updated_at = CURRENT_TIMESTAMP 
+                WHERE id = $1
+            """, user_id, password_hash)
+            
+            return result == "UPDATE 1"
+    
+    async def delete_user(self, user_id: int) -> bool:
+        """Delete a user"""
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("""
+                DELETE FROM users WHERE id = $1
+            """, user_id)
+            
+            return result == "DELETE 1"
+    
+    # ==================== ROLES ====================
+    
+    async def get_roles(self) -> List[Role]:
+        """Get all roles"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, name, description
+                FROM roles
+                ORDER BY id
+            """)
+            
+            return [Role(**dict(row)) for row in rows]
+    
+    async def get_user_roles(self, user_id: int) -> List[Role]:
+        """Get roles for a specific user"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT r.id, r.name, r.description
+                FROM roles r
+                JOIN user_roles ur ON r.id = ur.role_id
+                WHERE ur.user_id = $1
+            """, user_id)
+            
+            return [Role(**dict(row)) for row in rows]
+    
+    async def assign_role_to_user(self, user_id: int, role_id: int) -> bool:
+        """Assign a role to a user"""
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("""
+                INSERT INTO user_roles (user_id, role_id)
+                VALUES ($1, $2)
+                ON CONFLICT (user_id, role_id) DO NOTHING
+            """, user_id, role_id)
+            
+            return result == "INSERT 0 1"
+    
+    async def remove_role_from_user(self, user_id: int, role_id: int) -> bool:
+        """Remove a role from a user"""
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("""
+                DELETE FROM user_roles 
+                WHERE user_id = $1 AND role_id = $2
+            """, user_id, role_id)
+            
+            return result == "DELETE 1"
+    
+    # ==================== GENOME REFERENCES (ENHANCED) ====================
+    
+    async def create_genome_reference(
+        self,
+        key: str,
+        name: str,
+        url: str,
+        species: Optional[str] = None,
+        build: Optional[str] = None,
+        is_active: bool = True,
+        created_by: Optional[int] = None
+    ) -> GenomeReference:
+        """Create a new genome reference entry"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO genome_references (key, name, species, build, url, is_active, created_by)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id, key, name, species, build, url, is_active, created_by, created_at, updated_at
+            """, key, name, species, build, url, is_active, created_by)
+            
+            return GenomeReference(**dict(row))
+    
+    async def get_genome_references(self) -> List[GenomeReference]:
+        """Get all genome references"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, key, name, species, build, url, is_active, created_by, created_at, updated_at
+                FROM genome_references
+                ORDER BY created_at DESC
+            """)
+            
+            return [GenomeReference(**dict(row)) for row in rows]
+    
+    async def get_genome_reference(self, ref_id: int) -> Optional[GenomeReference]:
+        """Get a genome reference by ID"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, key, name, species, build, url, is_active, created_by, created_at, updated_at
+                FROM genome_references
+                WHERE id = $1
+            """, ref_id)
+            
+            return GenomeReference(**dict(row)) if row else None
+    
+    async def get_genome_reference_by_key(self, key: str) -> Optional[GenomeReference]:
+        """Get a genome reference by key"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, key, name, species, build, url, is_active, created_by, created_at, updated_at
+                FROM genome_references
+                WHERE key = $1
+            """, key)
+            
+            return GenomeReference(**dict(row)) if row else None
+    
+    async def update_genome_reference(
+        self,
+        ref_id: int,
+        key: Optional[str] = None,
+        name: Optional[str] = None,
+        species: Optional[str] = None,
+        build: Optional[str] = None,
+        url: Optional[str] = None,
+        is_active: Optional[bool] = None
+    ) -> Optional[GenomeReference]:
+        """Update genome reference"""
+        async with self.pool.acquire() as conn:
+            query = "UPDATE genome_references SET updated_at = CURRENT_TIMESTAMP"
+            params = [ref_id]
+            param_count = 1
+            
+            if key is not None:
+                param_count += 1
+                query += f", key = ${param_count}"
+                params.append(key)
+            
+            if name is not None:
+                param_count += 1
+                query += f", name = ${param_count}"
+                params.append(name)
+            
+            if species is not None:
+                param_count += 1
+                query += f", species = ${param_count}"
+                params.append(species)
+            
+            if build is not None:
+                param_count += 1
+                query += f", build = ${param_count}"
+                params.append(build)
+            
+            if url is not None:
+                param_count += 1
+                query += f", url = ${param_count}"
+                params.append(url)
+            
+            if is_active is not None:
+                param_count += 1
+                query += f", is_active = ${param_count}"
+                params.append(is_active)
+            
+            query += f" WHERE id = $1 RETURNING id, key, name, species, build, url, is_active, created_by, created_at, updated_at"
+            
+            row = await conn.fetchrow(query, *params)
+            return GenomeReference(**dict(row)) if row else None
+    
+    async def delete_genome_reference(self, ref_id: int) -> bool:
+        """Delete a genome reference"""
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("""
+                DELETE FROM genome_references WHERE id = $1
+            """, ref_id)
+            
+            return result == "DELETE 1"
+    
+    # ==================== PIPELINE SETTINGS ====================
+    
+    async def get_pipeline_settings(self) -> List[PipelineSetting]:
+        """Get all pipeline settings"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, setting_key, setting_value, data_type, validation_rules, description, created_by, created_at, updated_at
+                FROM pipeline_settings
+                ORDER BY setting_key
+            """)
+            
+            return [PipelineSetting(**dict(row)) for row in rows]
+    
+    async def get_pipeline_setting(self, key: str) -> Optional[PipelineSetting]:
+        """Get a pipeline setting by key"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, setting_key, setting_value, data_type, validation_rules, description, created_by, created_at, updated_at
+                FROM pipeline_settings
+                WHERE setting_key = $1
+            """, key)
+            
+            return PipelineSetting(**dict(row)) if row else None
+    
+    async def update_pipeline_setting(
+        self,
+        key: str,
+        setting_value: str,
+        data_type: Optional[str] = None,
+        validation_rules: Optional[str] = None,
+        description: Optional[str] = None
+    ) -> Optional[PipelineSetting]:
+        """Update a pipeline setting"""
+        async with self.pool.acquire() as conn:
+            query = "UPDATE pipeline_settings SET setting_value = $2, updated_at = CURRENT_TIMESTAMP"
+            params = [key, setting_value]
+            param_count = 2
+            
+            if data_type is not None:
+                param_count += 1
+                query += f", data_type = ${param_count}"
+                params.append(data_type)
+            
+            if validation_rules is not None:
+                param_count += 1
+                query += f", validation_rules = ${param_count}"
+                params.append(validation_rules)
+            
+            if description is not None:
+                param_count += 1
+                query += f", description = ${param_count}"
+                params.append(description)
+            
+            query += f" WHERE setting_key = $1 RETURNING id, setting_key, setting_value, data_type, validation_rules, description, created_by, created_at, updated_at"
+            
+            row = await conn.fetchrow(query, *params)
+            return PipelineSetting(**dict(row)) if row else None
+    
+    # ==================== AI PROVIDER SETTINGS ====================
+    
+    async def get_ai_provider_settings(self) -> List[AIProviderSetting]:
+        """Get all AI provider settings"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, provider, model, api_key_encrypted, base_url, is_active, created_by, created_at, updated_at
+                FROM ai_provider_settings
+                ORDER BY provider, model
+            """)
+            
+            return [AIProviderSetting(**dict(row)) for row in rows]
+    
+    async def get_ai_provider_setting(self, provider: str, model: str) -> Optional[AIProviderSetting]:
+        """Get AI provider setting by provider and model"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, provider, model, api_key_encrypted, base_url, is_active, created_by, created_at, updated_at
+                FROM ai_provider_settings
+                WHERE provider = $1 AND model = $2
+            """, provider, model)
+            
+            return AIProviderSetting(**dict(row)) if row else None
+    
+    async def update_ai_provider_setting(
+        self,
+        provider: str,
+        model: str,
+        api_key_encrypted: Optional[str] = None,
+        base_url: Optional[str] = None,
+        is_active: Optional[bool] = None
+    ) -> Optional[AIProviderSetting]:
+        """Update AI provider setting"""
+        async with self.pool.acquire() as conn:
+            query = "UPDATE ai_provider_settings SET updated_at = CURRENT_TIMESTAMP"
+            params = [provider, model]
+            param_count = 2
+            
+            if api_key_encrypted is not None:
+                param_count += 1
+                query += f", api_key_encrypted = ${param_count}"
+                params.append(api_key_encrypted)
+            
+            if base_url is not None:
+                param_count += 1
+                query += f", base_url = ${param_count}"
+                params.append(base_url)
+            
+            if is_active is not None:
+                param_count += 1
+                query += f", is_active = ${param_count}"
+                params.append(is_active)
+            
+            query += f" WHERE provider = $1 AND model = $2 RETURNING id, provider, model, api_key_encrypted, base_url, is_active, created_by, created_at, updated_at"
+            
+            row = await conn.fetchrow(query, *params)
+            return AIProviderSetting(**dict(row)) if row else None
+    
+    # ==================== UI PREFERENCES ====================
+    
+    async def get_ui_preferences(self, user_id: int) -> Optional[UIPreference]:
+        """Get UI preferences for a user"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, user_id, language, timezone, theme, display_options, created_at, updated_at
+                FROM ui_preferences
+                WHERE user_id = $1
+            """, user_id)
+            
+            return UIPreference(**dict(row)) if row else None
+    
+    async def update_ui_preferences(
+        self,
+        user_id: int,
+        language: Optional[str] = None,
+        timezone: Optional[str] = None,
+        theme: Optional[str] = None,
+        display_options: Optional[Dict[str, Any]] = None
+    ) -> Optional[UIPreference]:
+        """Update UI preferences for a user"""
+        async with self.pool.acquire() as conn:
+            # Check if preferences exist
+            existing = await self.get_ui_preferences(user_id)
+            
+            if existing:
+                # Update existing
+                query = "UPDATE ui_preferences SET updated_at = CURRENT_TIMESTAMP"
+                params = [user_id]
+                param_count = 1
+                
+                if language is not None:
+                    param_count += 1
+                    query += f", language = ${param_count}"
+                    params.append(language)
+                
+                if timezone is not None:
+                    param_count += 1
+                    query += f", timezone = ${param_count}"
+                    params.append(timezone)
+                
+                if theme is not None:
+                    param_count += 1
+                    query += f", theme = ${param_count}"
+                    params.append(theme)
+                
+                if display_options is not None:
+                    param_count += 1
+                    query += f", display_options = ${param_count}"
+                    params.append(display_options)
+                
+                query += f" WHERE user_id = $1 RETURNING id, user_id, language, timezone, theme, display_options, created_at, updated_at"
+                
+                row = await conn.fetchrow(query, *params)
+                return UIPreference(**dict(row)) if row else None
+            else:
+                # Create new
+                row = await conn.fetchrow("""
+                    INSERT INTO ui_preferences (user_id, language, timezone, theme, display_options)
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING id, user_id, language, timezone, theme, display_options, created_at, updated_at
+                """, user_id, language or 'en', timezone or 'UTC', theme or 'light', display_options or {})
+                
+                return UIPreference(**dict(row))
+    
+    # ==================== AUDIT LOGS ====================
+    
+    async def create_audit_log(
+        self,
+        user_id: Optional[int],
+        action: str,
+        resource_type: Optional[str] = None,
+        resource_id: Optional[int] = None,
+        details: Optional[Dict[str, Any]] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None
+    ) -> AuditLog:
+        """Create an audit log entry"""
+        async with self.pool.acquire() as conn:
+            details_json = json.dumps(details) if details else "{}"
+            row = await conn.fetchrow("""
+                INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, ip_address, user_agent)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+                RETURNING id, user_id, action, resource_type, resource_id, details, ip_address, user_agent, created_at
+            """, user_id, action, resource_type, resource_id, details_json, ip_address, user_agent)
+            
+            return AuditLog(**dict(row))
+    
+    async def get_audit_logs(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        user_id: Optional[int] = None,
+        action: Optional[str] = None
+    ) -> List[AuditLog]:
+        """Get audit logs with optional filtering"""
+        async with self.pool.acquire() as conn:
+            query = """
+                SELECT id, user_id, action, resource_type, resource_id, details, ip_address, user_agent, created_at
+                FROM audit_logs
+                WHERE 1=1
+            """
+            params = []
+            param_count = 0
+            
+            if user_id is not None:
+                param_count += 1
+                query += f" AND user_id = ${param_count}"
+                params.append(user_id)
+            
+            if action is not None:
+                param_count += 1
+                query += f" AND action = ${param_count}"
+                params.append(action)
+            
+            query += " ORDER BY created_at DESC"
+            param_count += 1
+            query += f" LIMIT ${param_count}"
+            params.append(limit)
+            param_count += 1
+            query += f" OFFSET ${param_count}"
+            params.append(offset)
+            
+            rows = await conn.fetch(query, *params)
+            return [AuditLog(**dict(row)) for row in rows]
+    
     # ==================== UTILITY ====================
     
     async def get_statistics(self) -> Dict[str, int]:
         """Get database statistics"""
         async with self.pool.acquire() as conn:
+            # Original statistics
             genome_count = await conn.fetchval("SELECT COUNT(*) FROM reference_genomes")
             ready_genomes = await conn.fetchval("SELECT COUNT(*) FROM reference_genomes WHERE status = 'ready'")
             sample_count = await conn.fetchval("SELECT COUNT(*) FROM samples")
             completed_samples = await conn.fetchval("SELECT COUNT(*) FROM samples WHERE status = 'completed'")
             
+            # New statistics
+            user_count = await conn.fetchval("SELECT COUNT(*) FROM users")
+            active_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_active = TRUE")
+            genome_ref_count = await conn.fetchval("SELECT COUNT(*) FROM genome_references")
+            active_genome_refs = await conn.fetchval("SELECT COUNT(*) FROM genome_references WHERE is_active = TRUE")
+            pipeline_settings_count = await conn.fetchval("SELECT COUNT(*) FROM pipeline_settings")
+            ai_provider_settings_count = await conn.fetchval("SELECT COUNT(*) FROM ai_provider_settings")
+            active_ai_providers = await conn.fetchval("SELECT COUNT(*) FROM ai_provider_settings WHERE is_active = TRUE")
+            audit_logs_count = await conn.fetchval("SELECT COUNT(*) FROM audit_logs")
+            
             return {
                 "total_reference_genomes": genome_count,
                 "ready_reference_genomes": ready_genomes,
                 "total_samples": sample_count,
-                "completed_samples": completed_samples
+                "completed_samples": completed_samples,
+                "total_users": user_count,
+                "active_users": active_users,
+                "total_genome_references": genome_ref_count,
+                "active_genome_references": active_genome_refs,
+                "pipeline_settings": pipeline_settings_count,
+                "ai_provider_settings": ai_provider_settings_count,
+                "active_ai_providers": active_ai_providers,
+                "audit_logs": audit_logs_count
             }
 
 

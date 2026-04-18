@@ -71,7 +71,7 @@ const getAlertStyles = (variant: AlertVariant) => {
       title: "text-red-800",
     },
   };
-  return styles[variant];
+  return styles[variant] || styles.info;
 };
 
 /**

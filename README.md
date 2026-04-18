@@ -63,11 +63,14 @@ The project has reached all planned development phases:
 
 ## 🚀 Features
 
+- **Secure Authentication**: JWT-based authentication with Argon2 password hashing, role-based access control (admin, analyst, researcher, viewer)
 - **Bioinformatics Pipeline**: FASTQ → BAM → VCF with BWA, SAMtools, bcftools, and GATK
 - **Knowledge Graph**: Neo4j with Gene, Mutation, Disease, Protein, Drug, and Paper nodes
 - **LLM Integration**: OpenRouter API for mutation explanation and report generation
 - **AI Agents**: Multi-agent system (VariantAgent, GraphAgent, LiteratureAgent, ReportAgent)
 - **Modern UI**: Next.js with Cytoscape.js visualization and IGV Genome Browser
+- **Settings Management**: Comprehensive platform configuration with permission-based access control
+- **MinIO Storage Integration**: Object storage for genome files with sync capabilities
 
 ## 🏗️ Architecture
 
@@ -192,10 +195,13 @@ AI-Genomics-Lab/
 ├── agents/                # AI Agent System
 │   └── __init__.py       # Multi-agent implementation (12,858 bytes)
 ├── services/              # Core services
-│   ├── llm_client.py     # OpenRouter client
-│   ├── neo4j_service.py  # Neo4j client
+│   ├── auth_service.py       # JWT authentication with Argon2 hashing
+│   ├── database_service.py   # PostgreSQL database with 8 tables
+│   ├── minio_service.py      # MinIO object storage client
+│   ├── llm_client.py         # OpenRouter client
+│   ├── neo4j_service.py      # Neo4j client
 │   ├── bio_pipeline_client.py  # Pipeline client
-│   └── cache_service.py  # Cache service
+│   └── cache_service.py      # Cache service
 ├── bio-pipeline/         # Bioinformatics pipeline
 │   ├── Dockerfile        # Pipeline container
 │   └── scripts/          # Pipeline scripts
@@ -205,13 +211,23 @@ AI-Genomics-Lab/
 ├── frontend/             # Next.js frontend
 │   ├── src/
 │   │   ├── app/         # Next.js pages
-│   │   │   ├── page.tsx       # Main dashboard
-│   │   │   ├── layout.tsx     # Layout
-│   │   │   └── globals.css    # Styles
-│   │   └── components/   # React components
-│   │       ├── GraphView.tsx    # Cytoscape.js visualization
-│   │       ├── VariantTable.tsx # Variant table with filters
-│   │       └── GenomeBrowser.tsx # IGV genome browser
+│   │   │   ├── page.tsx           # Main dashboard with tabs
+│   │   │   ├── login/             # Authentication page
+│   │   │   │   └── page.tsx       # Login form
+│   │   │   ├── settings/          # Settings dashboard
+│   │   │   │   └── page.tsx       # Settings with 7 tabs
+│   │   │   ├── layout.tsx         # Layout with navigation
+│   │   │   └── globals.css        # Styles
+│   │   ├── lib/                  # Utilities and API client
+│   │   │   └── api.ts            # API client with JWT management
+│   │   └── components/           # React components
+│   │       ├── sections/          # Page sections
+│   │       │   ├── StorageSection/   # MinIO storage management
+│   │       │   ├── AlignGenomeSection/ # Genome alignment interface
+│   │       │   └── ...              # Other sections
+│   │       ├── GraphView.tsx      # Cytoscape.js visualization
+│   │       ├── VariantTable.tsx   # Variant table with filters
+│   │       └── GenomeBrowser.tsx  # IGV genome browser
 │   └── package.json
 ├── docker/               # Docker configuration
 │   └── docker-compose.yml
@@ -288,6 +304,29 @@ IGV.js integration:
 - `GET /` - API information
 - `GET /health` - Health status
 
+### Authentication
+- `POST /api/auth/login` - User login with JWT token generation
+- `POST /api/auth/logout` - User logout and session cleanup
+- `GET /api/auth/me` - Get current user information
+- `POST /api/auth/refresh` - Refresh access token
+
+### Settings (Authenticated)
+- `GET /api/settings/genome-references` - Get genome references (admin only)
+- `POST /api/settings/genome-references` - Create genome reference (admin only)
+- `GET /api/settings/pipeline` - Get pipeline settings (admin only)
+- `PUT /api/settings/pipeline/{key}` - Update pipeline setting (admin only)
+- `GET /api/settings/ai-providers` - Get AI provider configurations
+- `GET /api/settings/ui-preferences` - Get user UI preferences
+- `PUT /api/settings/ui-preferences` - Update user UI preferences
+- `GET /api/settings/audit-logs` - View audit logs (admin only)
+- `GET /api/settings/system-health` - Get system health status
+
+### Storage (Authenticated)
+- `GET /storage/genomes` - List genomes from MinIO storage
+- `POST /storage/sync/genomes` - Sync local genomes to MinIO
+- `GET /storage/genomes/{genome_name}/status` - Get sync status for a genome
+- `POST /storage/genomes/{genome_name}/download` - Download genome from MinIO to local storage
+
 ### Analysis
 - `POST /analysis/upload` - Upload genome file
 - `POST /analysis/run` - Run pipeline
@@ -349,8 +388,8 @@ curl http://localhost:8000/health
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| **Frontend** | http://localhost:3000 | - |
-| **API Docs (Swagger)** | http://localhost:8000/docs | - |
+| **Frontend** | http://localhost:3000 | `admin@company.com` / `admin123` |
+| **API Docs (Swagger)** | http://localhost:8000/docs | (Authentication required for protected endpoints) |
 | **Neo4j Browser** | http://localhost:7474 | neo4j / genomics |
 | **MinIO Console** | http://localhost:9001 | genomics / genomics |
 | **PostgreSQL** | localhost:5432 | genomics / genomics / genomics |
@@ -361,6 +400,17 @@ curl http://localhost:8000/health
 # Check API health
 curl http://localhost:8000/health
 # Response: {"status":"healthy","api":"ok","database":"ok","graph":"ok","storage":"ok"}
+
+# Test authentication
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@company.com","password":"admin123","remember_me":false}'
+# Response: {"access_token":"eyJhbGciOiJ...","refresh_token":"...","token_type":"bearer","expires_in":1800}
+
+# Test authenticated endpoint (using the token from above)
+TOKEN="your_access_token_here"
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/auth/me
+# Response: {"id":1,"email":"admin@company.com","name":"Administrator","is_active":true,"roles":["admin"]}
 
 # Check available samples
 curl http://localhost:8000/analysis/status
@@ -555,10 +605,13 @@ REFERENCE_GENOME_GZ=/datasets/reference_genome/Homo_sapiens.GRCh38.dna_sm.toplev
 
 ## 🔒 Security
 
-- Genomic data is sensitive
-- Do not store API keys in code
-- Use environment variables
-- Consider GDPR principles
+- **Authentication System**: JWT-based authentication with Argon2 password hashing (GPU/ASIC-resistant)
+- **Role-Based Access Control**: Admin, analyst, researcher, viewer roles with granular permissions
+- **Secure Configuration**: Environment variables for secrets, no hardcoded credentials
+- **Genomic Data Protection**: Sensitive genomic data requires proper access controls
+- **API Security**: CORS configuration, rate limiting, SQL injection prevention
+- **Audit Logging**: Comprehensive logging of authentication events and configuration changes
+- **GDPR Compliance**: Consider data privacy regulations for genomic information
 
 ## 🧪 Testing
 
