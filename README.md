@@ -64,13 +64,17 @@ The project has reached all planned development phases:
 ## 🚀 Features
 
 - **Secure Authentication**: JWT-based authentication with Argon2 password hashing, role-based access control (admin, analyst, researcher, viewer)
+- **Genome Indexing Pipeline**: Nextflow-based genome indexing pipeline creating .fai, .gzi, and .sti indexes for alignment
+- **Reference Genome Management**: Web interface to manage genome references with URL download and MinIO synchronization
 - **Bioinformatics Pipeline**: FASTQ → BAM → VCF with BWA, SAMtools, bcftools, and GATK
 - **Knowledge Graph**: Neo4j with Gene, Mutation, Disease, Protein, Drug, and Paper nodes
 - **LLM Integration**: OpenRouter API for mutation explanation and report generation
 - **AI Agents**: Multi-agent system (VariantAgent, GraphAgent, LiteratureAgent, ReportAgent)
-- **Modern UI**: Next.js with Cytoscape.js visualization and IGV Genome Browser
+- **Modern UI**: Next.js dashboard with multiple sections (Alignment, Storage, Analysis, Samples, Reference Genomes)
 - **Settings Management**: Comprehensive platform configuration with permission-based access control
-- **MinIO Storage Integration**: Object storage for genome files with sync capabilities
+- **MinIO Storage Integration**: Object storage for genome files with sync capabilities between local and cloud storage
+- **Genome Sync Service**: Automated synchronization of genome files between local storage and MinIO buckets
+- **Real-time Job Monitoring**: Live streaming of Nextflow pipeline logs with stage tracking and progress updates
 
 ## 🏗️ Architecture
 
@@ -80,6 +84,16 @@ graph TB
         FASTQ[FASTQ Files]
         FASTA[FASTA Files]
         BAM[BAM Files]
+        GENOME_URL[Genome URLs]
+    end
+
+    subgraph Indexing["🧬 Genome Indexing Pipeline"]
+        NXF[Nextflow Runner]
+        DOWNLOAD[Download Genome]
+        FAI[Create .fai Index]
+        GZI[Create .gzi Index]
+        STI[Create .sti Index]
+        UPLOAD[Upload to MinIO]
     end
 
     subgraph Pipeline["🧬 Bioinformatics Pipeline"]
@@ -110,10 +124,21 @@ graph TB
 
     subgraph UI["🎨 User Interface"]
         NEXT[Next.js Frontend]
+        ALIGN_UI[Align Genome]
+        STORAGE_UI[Storage Manager]
+        REF_UI[Reference Genomes]
+        ANALYSIS_UI[Analysis Dashboard]
         GRAPH[Cytoscape.js Graph]
-        TABLE[Variant Table]
         BROWSER[IGV Genome Browser]
     end
+
+    GENOME_URL --> NXF
+    NXF --> DOWNLOAD
+    DOWNLOAD --> FAI
+    FAI --> GZI
+    GZI --> STI
+    STI --> UPLOAD
+    UPLOAD --> MINIO
 
     FASTQ --> QC
     FASTA --> QC
@@ -128,6 +153,7 @@ graph TB
     FASTQ --> MINIO
     FASTA --> MINIO
     BAM --> MINIO
+    MINIO --> ALIGN
 
     NEO4J --> GA
     GA --> LLM
@@ -139,10 +165,14 @@ graph TB
     FASTAPI --> NEO4J
     FASTAPI --> MINIO
     FASTAPI --> LLM
+    FASTAPI --> NXF
     
     NEXT --> FASTAPI
+    ALIGN_UI --> FASTAPI
+    STORAGE_UI --> MINIO
+    REF_UI --> FASTAPI
+    ANALYSIS_UI --> FASTAPI
     GRAPH --> NEO4J
-    TABLE --> FASTAPI
 ```
 
 ## 🔄 Data Flow
@@ -152,14 +182,40 @@ sequenceDiagram
     participant User
     participant Frontend
     participant API
+    participant Nextflow
+    participant MinIO
     participant Pipeline
     participant Neo4j
     participant LLM
 
+    Note over User,LLM: Genome Indexing Workflow
+    User->>Frontend: Add Genome Reference
+    Frontend->>API: POST /api/settings/genome-references
+    API->>Frontend: Reference saved
+    
+    User->>Frontend: Index Genome
+    Frontend->>API: POST /genome/index
+    API->>Nextflow: Execute Nextflow pipeline
+    Nextflow->>Nextflow: Download genome
+    Nextflow->>Nextflow: Create indexes (.fai, .gzi, .sti)
+    Nextflow->>MinIO: Upload indexes
+    Nextflow->>API: Streaming logs
+    API->>Frontend: Real-time updates
+    Nextflow->>API: Job completion
+    API->>Frontend: Indexing complete
+    
+    Note over User,LLM: Storage Management
+    User->>Frontend: Sync Genomes
+    Frontend->>API: POST /storage/sync/genomes
+    API->>MinIO: List genomes
+    MinIO->>API: Genome list
+    API->>Frontend: Sync status
+    
+    Note over User,LLM: Analysis Pipeline
     User->>Frontend: Upload Genome File
     Frontend->>API: POST /analysis/upload
-    API->>Pipeline: Store file
-    Pipeline->>API: File stored
+    API->>MinIO: Store file
+    MinIO->>API: File stored
     
     User->>Frontend: Run Analysis
     Frontend->>API: POST /analysis/run
@@ -188,12 +244,12 @@ sequenceDiagram
 
 ```
 AI-Genomics-Lab/
-├── api/                    # FastAPI backend
-│   ├── main.py            # API endpoints (550 lines)
+├── api/                    # FastAPI backend (1,747 lines)
+│   ├── main.py            # API endpoints with genome indexing, storage, settings
 │   ├── requirements.txt   # Python dependencies
 │   └── Dockerfile         # API container
 ├── agents/                # AI Agent System
-│   └── __init__.py       # Multi-agent implementation (12,858 bytes)
+│   └── __init__.py       # Multi-agent implementation (VariantAgent, GraphAgent, etc.)
 ├── services/              # Core services
 │   ├── auth_service.py       # JWT authentication with Argon2 hashing
 │   ├── database_service.py   # PostgreSQL database with 8 tables
@@ -201,9 +257,14 @@ AI-Genomics-Lab/
 │   ├── llm_client.py         # OpenRouter client
 │   ├── neo4j_service.py      # Neo4j client
 │   ├── bio_pipeline_client.py  # Pipeline client
-│   └── cache_service.py      # Cache service
-├── bio-pipeline/         # Bioinformatics pipeline
-│   ├── Dockerfile        # Pipeline container
+│   ├── cache_service.py      # Cache service
+│   ├── nextflow_runner.py    # Nextflow pipeline execution service
+│   └── genome_sync_service.py # Genome synchronization between local and MinIO
+├── bio-pipeline/         # Bioinformatics pipeline with Nextflow
+│   ├── Dockerfile        # Pipeline container with Nextflow, BWA, SAMtools, bcftools, Strobealign
+│   ├── genome_index_correct.nf  # Main Nextflow pipeline for genome indexing
+│   ├── pipeline_1_genome_prep.nf # Genome preparation pipeline
+│   ├── debug_bgzip.sh    # Debug scripts
 │   └── scripts/          # Pipeline scripts
 │       └── pipeline.sh   # BWA, SAMtools, bcftools pipeline
 ├── graph/                # Graph database
@@ -222,18 +283,36 @@ AI-Genomics-Lab/
 │   │   │   └── api.ts            # API client with JWT management
 │   │   └── components/           # React components
 │   │       ├── sections/          # Page sections
+│   │       │   ├── AlignGenomeSection/ # Genome alignment and indexing interface
 │   │       │   ├── StorageSection/   # MinIO storage management
-│   │       │   ├── AlignGenomeSection/ # Genome alignment interface
-│   │       │   └── ...              # Other sections
+│   │       │   ├── AnalysisSection/  # Analysis dashboard
+│   │       │   ├── DashboardSection/ # Main dashboard
+│   │       │   ├── ReferenceGenomesSection/ # Genome reference management
+│   │       │   └── SamplesSection/   # Sample management
+│   │       ├── ui/                # UI component library
+│   │       │   ├── Button/        # Button component with loading states
+│   │       │   ├── Card/          # Card component
+│   │       │   └── ...            # Other UI components
 │   │       ├── GraphView.tsx      # Cytoscape.js visualization
 │   │       ├── VariantTable.tsx   # Variant table with filters
 │   │       └── GenomeBrowser.tsx  # IGV genome browser
 │   └── package.json
 ├── docker/               # Docker configuration
-│   └── docker-compose.yml
-├── scripts/             # Data ingestion scripts
+│   └── docker-compose.yml  # Multi-service setup with API, frontend, databases, MinIO, pipeline
+├── scripts/             # Data ingestion and utility scripts
 │   ├── ingest_sample_data.py
-│   └── ingest_clinvar_data.py
+│   ├── ingest_clinvar_data.py
+│   └── init_database.py # Database initialization
+├── datasets/            # Genomic data storage (not in version control)
+│   ├── fastq/           # FASTQ input files
+│   ├── bam/             # BAM aligned files
+│   ├── vcf/             # VCF variant files
+│   ├── logs/            # Pipeline logs
+│   ├── reference_genome/ # Reference genome files
+│   └── annotations/     # Annotation files
+├── pipelines/           # Pipeline definitions (placeholder)
+├── nextflow             # Nextflow executable (Linux)
+├── test_pipeline.sh     # Pipeline testing script
 └── README.md
 ```
 
@@ -247,7 +326,8 @@ AI-Genomics-Lab/
 | **AI/LLM** | OpenRouter, LangGraph |
 | **Frontend** | Next.js 14, React 18, Tailwind CSS |
 | **Visualization** | Cytoscape.js, IGV.js, Recharts |
-| **Bioinformatics** | BWA, SAMtools, bcftools, GATK |
+| **Pipeline Orchestration** | Nextflow |
+| **Bioinformatics** | BWA, SAMtools, bcftools, GATK, Strobealign |
 
 ## 🌐 Services and Ports
 
@@ -279,20 +359,56 @@ AI-Genomics-Lab/
 
 ## 🎨 Frontend Components
 
-### GraphView
+### Dashboard Sections
+
+#### AlignGenomeSection
+Genome alignment and indexing interface:
+- Reference genome selection with indexed status badges
+- Read length configuration for alignment
+- Real-time Nextflow pipeline execution with live log streaming
+- Stage tracking (downloading, indexing, uploading)
+- Cancel indexing and delete index functionality
+
+#### StorageSection
+MinIO storage management:
+- List genomes available in MinIO buckets
+- Sync genomes between local storage and MinIO
+- Download genomes from MinIO to local storage
+- Visual status indicators for sync progress
+
+#### AnalysisSection
+Analysis dashboard with pipeline controls:
+- File upload for FASTQ/BAM/VCF files
+- Pipeline execution controls
+- Analysis status monitoring
+
+#### ReferenceGenomesSection
+Genome reference management:
+- Add/edit/delete genome references with URL, species, build
+- Test genome URL connectivity
+- Manage active/inactive references
+
+#### SamplesSection
+Sample management interface:
+- List and manage genomic samples
+- Sample metadata editing
+
+### Visualization Components
+
+#### GraphView
 Interactive knowledge graph visualization using Cytoscape.js:
 - Nodes: Genes (blue), Mutations (red), Diseases (green)
 - Relationships: HAS_MUTATION, CAUSES, INTERACTS_WITH
 - Interactive: click to select, zoom, pan
 
-### VariantTable
+#### VariantTable
 Variant table with:
 - Search by gene or position
 - Filters by type (SNP, Indel, Structural)
 - Pathogenicity classification (pathogenic, likely_pathogenic, uncertain, likely_benign, benign)
 - Data export
 
-### GenomeBrowser
+#### GenomeBrowser
 IGV.js integration:
 - Chromosomal locus navigation
 - Quick navigation: BRCA1, TP53, EGFR, KRAS
@@ -313,19 +429,32 @@ IGV.js integration:
 ### Settings (Authenticated)
 - `GET /api/settings/genome-references` - Get genome references (admin only)
 - `POST /api/settings/genome-references` - Create genome reference (admin only)
+- `PUT /api/settings/genome-references/{ref_id}` - Update genome reference (admin only)
+- `DELETE /api/settings/genome-references/{ref_id}` - Delete genome reference (admin only)
+- `POST /api/settings/genome-references/{ref_id}/test` - Test genome reference URL (admin only)
 - `GET /api/settings/pipeline` - Get pipeline settings (admin only)
 - `PUT /api/settings/pipeline/{key}` - Update pipeline setting (admin only)
 - `GET /api/settings/ai-providers` - Get AI provider configurations
+- `POST /api/settings/ai-providers/test` - Test AI provider connection (admin only)
 - `GET /api/settings/ui-preferences` - Get user UI preferences
 - `PUT /api/settings/ui-preferences` - Update user UI preferences
 - `GET /api/settings/audit-logs` - View audit logs (admin only)
 - `GET /api/settings/system-health` - Get system health status
+
+### Genome (Authenticated)
+- `GET /genome/indexed` - Get indexing status for all genomes
+- `GET /genome/status/{genome_id}` - Get indexing status for a specific genome
+- `POST /genome/index` - Start genome indexing using Nextflow pipeline
+- `DELETE /genome/index/{genome_id}` - Delete genome index files
+- `GET /genome/jobs` - Get all genome indexing jobs
+- `GET /genome/job/{job_id}` - Get genome indexing job status
 
 ### Storage (Authenticated)
 - `GET /storage/genomes` - List genomes from MinIO storage
 - `POST /storage/sync/genomes` - Sync local genomes to MinIO
 - `GET /storage/genomes/{genome_name}/status` - Get sync status for a genome
 - `POST /storage/genomes/{genome_name}/download` - Download genome from MinIO to local storage
+- `GET /storage/test` - Test storage connectivity
 
 ### Analysis
 - `POST /analysis/upload` - Upload genome file
@@ -522,6 +651,36 @@ LOGS_DIR=/datasets/logs
 ANNOTATION_DIR=/datasets/annotations
 ```
 
+## 🧬 Genome Indexing Pipeline
+
+### Overview
+The genome indexing pipeline uses Nextflow to download reference genomes and create necessary indexes for alignment (.fai, .gzi, .sti). The pipeline runs in a Docker container and uploads results to MinIO for persistent storage.
+
+### Nextflow Pipeline
+- **Input**: Genome ID and optional URL
+- **Processes**: Download, FASTA index (.fai), BGZIP index (.gzi), Strobealign index (.sti)
+- **Output**: Index files uploaded to MinIO bucket
+- **Real-time monitoring**: Live log streaming via Server-Sent Events (SSE)
+
+### Index Types
+- **.fai**: FASTA index for random access to sequences
+- **.gzi**: BGZIP index for compressed FASTA files
+- **.sti**: Strobealign index for fast read alignment
+
+### Usage via API
+```bash
+# Start genome indexing
+curl -X POST http://localhost:8000/genome/index \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "genome_id=hg38&read_length=150"
+
+# Check indexing status
+curl http://localhost:8000/genome/indexed
+
+# Stream logs for a job
+# (Implemented via SSE in frontend)
+```
+
 ### VariantAgent
 Analyzes specific variants by querying the knowledge graph and generating clinical interpretations.
 
@@ -635,7 +794,7 @@ Email: xavieraraque@gmail.com
 GitHub: https://github.com/rendergraf/AI-Genomics-Lab  
 Version: 0.1  
 Location: Spain  
-Date: March 2026  
+Date: April 2026  
 
 ---
 
