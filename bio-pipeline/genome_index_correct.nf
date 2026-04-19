@@ -11,7 +11,6 @@ nextflow.enable.dsl = 2
 params.genome_id = "hg38"
 params.genome_url = null
 params.output_dir = "/datasets/reference_genome"
-params.threads = null
 params.read_length = 150
 params.minio_bucket = "genomics"
 params.minio_prefix = "reference_genome"
@@ -102,17 +101,17 @@ process download_and_prepare_genome {
     strobealign -i -r ${params.read_length} "${params.output_dir}/${genome_id}.fa.gz"
     
     # Find actual STI file generated (strobealign may round read length)
-    actual_sti=$(ls "${params.output_dir}/${genome_id}.fa.gz.r"*.sti 2>/dev/null | head -1)
+    actual_sti=\$(ls "${params.output_dir}/${genome_id}.fa.gz.r"*.sti 2>/dev/null | head -1)
     
-    if [ -n "$actual_sti" ] && [ -f "$actual_sti" ]; then
-        actual_name=$(basename "$actual_sti")
-        echo "✅ Strobealign index created: $actual_name"
+    if [ -n "\$actual_sti" ] && [ -f "\$actual_sti" ]; then
+        actual_name=\$(basename "\$actual_sti")
+        echo "✅ Strobealign index created: \$actual_name"
         
         # If the actual name doesn't match expected read length, rename it
         expected_name="${genome_id}.fa.gz.r${params.read_length}.sti"
-        if [ "$actual_name" != "$expected_name" ]; then
-            echo "⚠️  STI file has different read length ($actual_name), renaming to $expected_name"
-            cp "$actual_sti" "${params.output_dir}/$expected_name"
+        if [ "\$actual_name" != "\$expected_name" ]; then
+            echo "⚠️  STI file has different read length (\$actual_name), renaming to \$expected_name"
+            cp "\$actual_sti" "${params.output_dir}/\$expected_name"
         fi
     else
         echo "⚠️  No STI file found after strobealign indexing"
