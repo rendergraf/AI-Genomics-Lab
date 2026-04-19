@@ -385,14 +385,25 @@ async def get_genome_info(genome_id: str) -> Dict[str, Any]:
 async def check_genome_indexed(genome_id: str) -> dict:
     """Check if a genome is indexed by verifying file existence in MinIO"""
     minio_service = get_minio_service()
+    db_service = get_database_service()
     bucket = "genomics"
     prefix = f"reference_genome/{genome_id}"
+    
+    # Get read_length from pipeline settings, default to 150
+    read_length = 150
+    try:
+        read_length_setting = await db_service.get_pipeline_setting('default_read_length')
+        if read_length_setting and read_length_setting.setting_value:
+            read_length = int(read_length_setting.setting_value)
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to get read_length setting: {e}, using default 150")
     
     files = {
         "bgzip_fasta": f"{genome_id}.fa.gz",
         "fai_index": f"{genome_id}.fa.gz.fai",
         "gzi_index": f"{genome_id}.fa.gz.gzi",
-        "sti_index": f"{genome_id}.fa.gz.sti"
+        "sti_index": f"{genome_id}.fa.gz.r{read_length}.sti"
     }
     
     status = {}
@@ -452,12 +463,23 @@ async def delete_genome_index(
     # Validate genome exists and get genome info
     genome_info = await get_genome_info(genome_id)
     
+    # Get read_length from pipeline settings, default to 150
+    db_service = get_database_service()
+    read_length = 150
+    try:
+        read_length_setting = await db_service.get_pipeline_setting('default_read_length')
+        if read_length_setting and read_length_setting.setting_value:
+            read_length = int(read_length_setting.setting_value)
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to get read_length setting: {e}, using default 150")
+    
     base_dir = "/datasets/reference_genome"
     files_to_delete = [
         f"{genome_id}.fa.gz",
         f"{genome_id}.fa.gz.fai",
         f"{genome_id}.fa.gz.gzi",
-        f"{genome_id}.fa.gz.sti"
+        f"{genome_id}.fa.gz.r{read_length}.sti"
     ]
     
     deleted_local = []
@@ -561,7 +583,8 @@ async def get_genome_job(
 
 @app.post("/genome/index", tags=["Genome"], summary="Genome indexing using Nextflow pipeline")
 async def genome_index(
-    genome_id: str = Form(..., description="Genome ID (e.g., hg38, hg19, or custom genome defined in Settings)")
+    genome_id: str = Form(..., description="Genome ID (e.g., hg38, hg19, or custom genome defined in Settings)"),
+    read_length: Optional[int] = Form(None, description="Read length for strobealign index (bp). If not provided, uses default from pipeline settings.")
 ):
     """
     Genome indexing using Nextflow pipeline in bio-pipeline container
@@ -576,9 +599,10 @@ async def genome_index(
     # Get genome information from database or REMOTE_GENOMES
     genome_info = await get_genome_info(genome_id)
     
-    # Get read length setting
-    read_length_setting = await db_service.get_pipeline_setting('default_read_length')
-    read_length = int(read_length_setting.setting_value) if read_length_setting else 150
+    # Determine read length: use provided value, else get from settings
+    if read_length is None:
+        read_length_setting = await db_service.get_pipeline_setting('default_read_length')
+        read_length = int(read_length_setting.setting_value) if read_length_setting else 150
     
     # Create pipeline job in database
     parameters = json.dumps({
@@ -721,7 +745,9 @@ async def genome_index(
                     bgzip_url = f"s3://{bucket}/{prefix}/{genome_id}.fa.gz"
                     fai_url = f"s3://{bucket}/{prefix}/{genome_id}.fa.gz.fai"
                     gzi_url = f"s3://{bucket}/{prefix}/{genome_id}.fa.gz.gzi"
-                    sti_url = f"s3://{bucket}/{prefix}/{genome_id}.fa.gz.sti"
+                    # Use the read_length that was passed to the pipeline
+                    # (already determined from user input or settings)
+                    sti_url = f"s3://{bucket}/{prefix}/{genome_id}.fa.gz.r{read_length}.sti"
                     
                     # Check if reference genome already exists
                     existing_genome = await db_service.get_reference_genome_by_name(genome_info["name"])
@@ -973,11 +999,20 @@ async def delete_genome_reference(
             # We'll use the existing delete_genome_index function logic
             minio_service = get_minio_service()
             base_dir = "/datasets/reference_genome"
+            # Get read_length from pipeline settings, default to 150
+            read_length = 150
+            try:
+                read_length_setting = await db_service.get_pipeline_setting('default_read_length')
+                if read_length_setting and read_length_setting.setting_value:
+                    read_length = int(read_length_setting.setting_value)
+            except Exception as e:
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to get read_length setting: {e}, using default 150")
             files_to_delete = [
                 f"{reference.key}.fa.gz",
                 f"{reference.key}.fa.gz.fai",
                 f"{reference.key}.fa.gz.gzi",
-                f"{reference.key}.fa.gz.sti"
+                f"{reference.key}.fa.gz.r{read_length}.sti"
             ]
             
             # Delete MinIO objects
