@@ -23,6 +23,14 @@ class MinioService:
         self.secret_key = os.getenv("MINIO_SECRET_KEY", "genomics")
         self.secure = False  # Use HTTP for internal communication
         self.public_endpoint = os.getenv("MINIO_PUBLIC_ENDPOINT", self.endpoint)
+        # Determine connection endpoint for presigned URLs
+        if self.public_endpoint.startswith("localhost:"):
+            # When public endpoint is localhost, try different internal endpoints
+            # First try the service name 'minio' (Docker internal network)
+            self.public_connection_endpoint = self.public_endpoint.replace("localhost", "minio")
+        else:
+            self.public_connection_endpoint = self.public_endpoint
+        self.public_url_endpoint = self.public_endpoint  # The endpoint that appears in the final URL
         self.bucket_default = "genomics"
         # Bucket configuration from environment variables
         self.buckets = {
@@ -35,8 +43,11 @@ class MinioService:
             "genomics": os.getenv("MINIO_BUCKET_GENOMICS", "genomics"),
         }
         self.client = None
+        self.public_client = None
         self._executor = ThreadPoolExecutor(max_workers=4)
         self._initialize_client()
+        if self.public_endpoint != self.endpoint:
+            self._initialize_public_client()
         self._ensure_all_buckets()
     
     def _initialize_client(self):
@@ -51,6 +62,38 @@ class MinioService:
         except Exception as e:
             logger.error(f"Failed to initialize MinIO client: {e}")
             raise
+    
+    def _initialize_public_client(self):
+        """Initialize a separate MinIO client for public endpoint (presigned URLs)"""
+        endpoints_to_try = [self.public_connection_endpoint, self.public_endpoint]
+        if self.public_connection_endpoint != self.public_endpoint:
+            # Also try the original endpoint as fallback
+            endpoints_to_try.append(self.public_endpoint)
+        
+        last_exception = None
+        for endpoint in endpoints_to_try:
+            try:
+                self.public_client = Minio(
+                    endpoint,
+                    access_key=self.access_key,
+                    secret_key=self.secret_key,
+                    secure=self.secure
+                )
+                # Test connection by listing buckets (lightweight operation)
+                self.public_client.list_buckets()
+                logger.info(f"MinIO public client initialized for endpoint {endpoint}")
+                # Update connection endpoint to the one that worked
+                self.public_connection_endpoint = endpoint
+                return
+            except Exception as e:
+                logger.warning(f"Failed to initialize MinIO public client with endpoint {endpoint}: {e}")
+                last_exception = e
+                continue
+        
+        # If all endpoints fail, fall back to regular client
+        logger.error(f"All endpoints failed for public client, falling back to regular client")
+        self.public_client = self.client
+        self.public_connection_endpoint = self.endpoint
     
     def _ensure_bucket(self, bucket_name: str = None):
         bucket = bucket_name or self.bucket_default
@@ -237,10 +280,16 @@ class MinioService:
         """Generate a presigned URL for GET access"""
         def _generate():
             try:
-                url = self.client.presigned_get_object(bucket, object_name, expires=timedelta(seconds=expires_seconds))
-                # Replace internal endpoint with public endpoint for external access
-                if self.endpoint != self.public_endpoint:
-                    url = url.replace(f"http://{self.endpoint}", f"http://{self.public_endpoint}")
+                # Use public client if available, otherwise fall back to regular client
+                client = self.public_client or self.client
+                url = client.presigned_get_object(bucket, object_name, expires=timedelta(seconds=expires_seconds))
+                # Replace connection host with public URL host if different
+                if (self.public_connection_endpoint != self.public_url_endpoint and 
+                    f"http://{self.public_connection_endpoint}" in url):
+                    url = url.replace(
+                        f"http://{self.public_connection_endpoint}",
+                        f"http://{self.public_url_endpoint}"
+                    )
                 return url
             except S3Error as e:
                 logger.error(f"Failed to generate presigned GET URL for {bucket}/{object_name}: {e}")
@@ -253,10 +302,16 @@ class MinioService:
         """Generate a presigned URL for PUT upload"""
         def _generate():
             try:
-                url = self.client.presigned_put_object(bucket, object_name, expires=timedelta(seconds=expires_seconds))
-                # Replace internal endpoint with public endpoint for external access
-                if self.endpoint != self.public_endpoint:
-                    url = url.replace(f"http://{self.endpoint}", f"http://{self.public_endpoint}")
+                # Use public client if available, otherwise fall back to regular client
+                client = self.public_client or self.client
+                url = client.presigned_put_object(bucket, object_name, expires=timedelta(seconds=expires_seconds))
+                # Replace connection host with public URL host if different
+                if (self.public_connection_endpoint != self.public_url_endpoint and 
+                    f"http://{self.public_connection_endpoint}" in url):
+                    url = url.replace(
+                        f"http://{self.public_connection_endpoint}",
+                        f"http://{self.public_url_endpoint}"
+                    )
                 return url
             except S3Error as e:
                 logger.error(f"Failed to generate presigned PUT URL for {bucket}/{object_name}: {e}")

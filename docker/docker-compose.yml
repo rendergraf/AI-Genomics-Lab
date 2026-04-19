@@ -37,7 +37,7 @@ services:
       # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - NXF_WORK=/nextflow-work
       - JWT_SECRET_KEY=your-secret-key-change-in-production
-      - MINIO_PUBLIC_ENDPOINT=localhost:9000
+      - MINIO_PUBLIC_ENDPOINT=host.docker.internal:9000
     command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
       - postgres
@@ -46,6 +46,8 @@ services:
       - bio-pipeline
     networks:
       - genomics-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # =======================
   # Graph Database (Neo4j)
@@ -96,6 +98,7 @@ services:
       - MINIO_ROOT_USER=genomics
       - MINIO_ROOT_PASSWORD=genomics
       - MINIO_SERVER_URL=http://localhost:9000
+      - MINIO_DOMAIN=localhost,minio,host.docker.internal
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data

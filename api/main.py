@@ -29,6 +29,7 @@ from services.nextflow_runner import get_nextflow_runner
 from services.database_service import get_database_service
 from services.minio_service import get_minio_service
 from services.auth_service import get_auth_service
+from minio.error import S3Error
 
 # Import Pydantic for request/response models
 from pydantic import BaseModel, EmailStr, Field
@@ -353,6 +354,34 @@ REMOTE_GENOMES = {
 }
 
 
+async def get_genome_info(genome_id: str) -> Dict[str, Any]:
+    """Get genome information from REMOTE_GENOMES or database"""
+    # First check REMOTE_GENOMES for backward compatibility
+    if genome_id in REMOTE_GENOMES:
+        info = REMOTE_GENOMES[genome_id].copy()
+        info["key"] = genome_id
+        return info
+    
+    # If not in REMOTE_GENOMES, check database
+    db_service = get_database_service()
+    reference = await db_service.get_genome_reference_by_key(genome_id)
+    if reference and reference.is_active:
+        return {
+            "key": reference.key,
+            "name": reference.name,
+            "species": reference.species or "",
+            "build": reference.build or "",
+            "url": reference.url,
+            "is_active": reference.is_active
+        }
+    
+    # Not found
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Unknown genome: {genome_id}"
+    )
+
+
 async def check_genome_indexed(genome_id: str) -> dict:
     """Check if a genome is indexed by verifying file existence in MinIO"""
     minio_service = get_minio_service()
@@ -392,37 +421,36 @@ async def check_genome_indexed(genome_id: str) -> dict:
 
 @app.get("/genome/indexed", tags=["Genome"], summary="Get indexing status for all genomes")
 async def get_indexed_genomes():
-    """Get indexing status for all available genomes"""
+    """Get indexing status for all available genomes (built-in and custom)"""
+    db_service = get_database_service()
+    custom_genomes = await db_service.get_genome_references()
+    active_custom_ids = {ref.key for ref in custom_genomes if ref.is_active}
+    all_genome_ids = set(REMOTE_GENOMES.keys()) | active_custom_ids
+    
     status = {}
-    for genome_id in REMOTE_GENOMES.keys():
+    for genome_id in all_genome_ids:
         status[genome_id] = await check_genome_indexed(genome_id)
     return status
 
 
 @app.get("/genome/status/{genome_id}", tags=["Genome"], summary="Get indexing status for a specific genome")
 async def get_genome_status(
-    genome_id: str = Path(..., description="Genome ID: hg38, hg38-test (chromosome 21), or hg19")
+    genome_id: str = Path(..., description="Genome ID (e.g., hg38, hg19, or custom genome defined in Settings)")
 ):
     """Get detailed indexing status for a specific genome"""
-    if genome_id not in REMOTE_GENOMES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown genome: {genome_id}. Available: {list(REMOTE_GENOMES.keys())}"
-        )
+    # Validate genome exists (will raise HTTPException if not found)
+    await get_genome_info(genome_id)
     
     return await check_genome_indexed(genome_id)
 
 
 @app.delete("/genome/index/{genome_id}", tags=["Genome"], summary="Delete genome index files")
 async def delete_genome_index(
-    genome_id: str = Path(..., description="Genome ID: hg38, hg38-test (chromosome 21), or hg19")
+    genome_id: str = Path(..., description="Genome ID (e.g., hg38, hg19, or custom genome defined in Settings)")
 ):
     """Delete genome index files (bgzip, fai, gzi, sti) from local storage and MinIO"""
-    if genome_id not in REMOTE_GENOMES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown genome: {genome_id}. Available: {list(REMOTE_GENOMES.keys())}"
-        )
+    # Validate genome exists and get genome info
+    genome_info = await get_genome_info(genome_id)
     
     base_dir = "/datasets/reference_genome"
     files_to_delete = [
@@ -464,10 +492,47 @@ async def delete_genome_index(
     except Exception as e:
         errors.append(f"minio_service: {str(e)}")
     
+    # Delete database records
+    db_service = get_database_service()
+    try:
+        # Find reference genome by name
+        # genome_info already contains the name from get_genome_info
+        existing_genome = await db_service.get_reference_genome_by_name(genome_info["name"])
+        if existing_genome:
+            await db_service.delete_reference_genome(existing_genome.id)
+            deleted_db = True
+        else:
+            deleted_db = False
+    except Exception as e:
+        errors.append(f"database:reference_genome: {str(e)}")
+        deleted_db = False
+    
+    # Delete related pipeline jobs
+    try:
+        deleted_jobs_count = await db_service.delete_pipeline_jobs_by_genome(genome_id)
+    except Exception as e:
+        errors.append(f"database:pipeline_jobs: {str(e)}")
+        deleted_jobs_count = 0
+    
+    # Delete genome-specific directory if exists
+    genome_dir = os.path.join("/datasets/reference_genome", genome_id)
+    if os.path.exists(genome_dir):
+        try:
+            shutil.rmtree(genome_dir)
+            deleted_dir = True
+        except Exception as e:
+            errors.append(f"directory:{genome_dir}: {str(e)}")
+            deleted_dir = False
+    else:
+        deleted_dir = False
+    
     return {
         "genome_id": genome_id,
         "deleted_local": deleted_local,
         "deleted_minio": deleted_minio,
+        "deleted_db": deleted_db,
+        "deleted_jobs_count": deleted_jobs_count,
+        "deleted_dir": deleted_dir,
         "errors": errors,
         "success": len(errors) == 0,
         "storage": "minio" if deleted_minio else "local_only"
@@ -496,31 +561,32 @@ async def get_genome_job(
 
 @app.post("/genome/index", tags=["Genome"], summary="Genome indexing using Nextflow pipeline")
 async def genome_index(
-    genome_id: str = Form(..., description="Genome ID: hg38, hg38-test (chromosome 21), or hg19")
+    genome_id: str = Form(..., description="Genome ID (e.g., hg38, hg19, or custom genome defined in Settings)")
 ):
     """
     Genome indexing using Nextflow pipeline in bio-pipeline container
     Creates a pipeline job in database and streams real-time progress
+    Supports both built-in genomes (hg38, hg38-test, hg19) and custom genomes defined in Settings
     """
-    if genome_id not in REMOTE_GENOMES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown genome: {genome_id}. Available: {list(REMOTE_GENOMES.keys())}"
-        )
-    
     db_service = get_database_service()
     nextflow_runner = get_nextflow_runner()
     minio_service = get_minio_service()
     reference_bucket = minio_service.get_bucket("reference")
     
+    # Get genome information from database or REMOTE_GENOMES
+    genome_info = await get_genome_info(genome_id)
+    
+    # Get read length setting
+    read_length_setting = await db_service.get_pipeline_setting('default_read_length')
+    read_length = int(read_length_setting.setting_value) if read_length_setting else 150
+    
     # Create pipeline job in database
-    genome_info = REMOTE_GENOMES[genome_id]
     parameters = json.dumps({
         "genome_id": genome_id,
-        "name": genome_info["name"],
-        "species": genome_info["species"],
-        "build": genome_info["build"],
-        "url": genome_info["url"],
+        "name": genome_info.get("name", genome_id),
+        "species": genome_info.get("species", ""),
+        "build": genome_info.get("build", ""),
+        "url": genome_info.get("url", ""),
         "output_dir": "/datasets/reference_genome"
     })
     
@@ -546,10 +612,12 @@ async def genome_index(
             # Start Nextflow pipeline
             job_info = nextflow_runner.run_genome_indexing(
                 genome_id=genome_id,
+                genome_url=genome_info["url"],
                 output_dir=None,  # Use temporary directory
                 job_id=str(pipeline_job.id),
                 minio_bucket=reference_bucket,
-                minio_prefix="reference_genome"
+                minio_prefix="reference_genome",
+                read_length=read_length
             )
             
             # Update job with log file path
@@ -826,6 +894,160 @@ async def create_genome_reference(
     )
     
     return GenomeReferenceResponse(**reference.__dict__)
+
+@app.put("/api/settings/genome-references/{ref_id}", tags=["Settings"], summary="Update genome reference")
+async def update_genome_reference(
+    ref_id: int,
+    request: GenomeReferenceRequest,
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Update a genome reference (admin only)"""
+    db_service = get_database_service()
+    
+    # Check if reference exists
+    existing = await db_service.get_genome_reference(ref_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Genome reference not found"
+        )
+    
+    # Check if key already exists (if changing key)
+    if request.key != existing.key:
+        key_exists = await db_service.get_genome_reference_by_key(request.key)
+        if key_exists:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Genome reference with key '{request.key}' already exists"
+            )
+    
+    # Update reference
+    reference = await db_service.update_genome_reference(
+        ref_id=ref_id,
+        key=request.key,
+        name=request.name,
+        url=request.url,
+        species=request.species,
+        build=request.build,
+        is_active=request.is_active
+    )
+    
+    if not reference:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Genome reference not found after update"
+        )
+    
+    # Log action
+    auth_service = get_auth_service()
+    await auth_service.log_auth_event(
+        user_id=current_user["id"],
+        action="update_genome_reference",
+        details={"ref_id": ref_id, "key": request.key, "name": request.name}
+    )
+    
+    return GenomeReferenceResponse(**reference.__dict__)
+
+@app.delete("/api/settings/genome-references/{ref_id}", tags=["Settings"], summary="Delete genome reference")
+async def delete_genome_reference(
+    ref_id: int,
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Delete a genome reference and associated index files (admin only)"""
+    db_service = get_database_service()
+    
+    # Get reference before deletion
+    reference = await db_service.get_genome_reference(ref_id)
+    if not reference:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Genome reference not found"
+        )
+    
+    # Delete associated index files for any genome (built-in or custom)
+    deleted_index_info = None
+    if reference.key:
+        try:
+            # Call the genome index deletion endpoint
+            import asyncio
+            # We'll use the existing delete_genome_index function logic
+            minio_service = get_minio_service()
+            base_dir = "/datasets/reference_genome"
+            files_to_delete = [
+                f"{reference.key}.fa.gz",
+                f"{reference.key}.fa.gz.fai",
+                f"{reference.key}.fa.gz.gzi",
+                f"{reference.key}.fa.gz.sti"
+            ]
+            
+            # Delete MinIO objects
+            bucket = minio_service.get_bucket("reference")
+            prefix = f"reference_genome/{reference.key}"
+            
+            for filename in files_to_delete:
+                object_name = f"{prefix}/{filename}"
+                try:
+                    exists = await minio_service.object_exists(bucket, object_name)
+                    if exists:
+                        await minio_service.delete_object(bucket, object_name)
+                except Exception:
+                    pass  # Silently fail for MinIO deletions
+            
+            # Delete local files
+            for filename in files_to_delete:
+                path = os.path.join(base_dir, filename)
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
+            
+            # Delete database records
+            existing_genome = await db_service.get_reference_genome_by_name(reference.name)
+            if existing_genome:
+                await db_service.delete_reference_genome(existing_genome.id)
+            
+            # Delete pipeline jobs
+            await db_service.delete_pipeline_jobs_by_genome(reference.key)
+            
+            # Delete genome directory if exists
+            genome_dir = os.path.join("/datasets/reference_genome", reference.key)
+            if os.path.exists(genome_dir):
+                import shutil
+                shutil.rmtree(genome_dir, ignore_errors=True)
+            
+            deleted_index_info = {
+                "genome_key": reference.key,
+                "deleted_files": True
+            }
+        except Exception as e:
+            deleted_index_info = {
+                "genome_key": reference.key,
+                "deleted_files": False,
+                "error": str(e)
+            }
+    
+    # Delete the genome reference
+    deleted = await db_service.delete_genome_reference(ref_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Genome reference not found or could not be deleted"
+        )
+    
+    # Log action
+    auth_service = get_auth_service()
+    await auth_service.log_auth_event(
+        user_id=current_user["id"],
+        action="delete_genome_reference",
+        details={"ref_id": ref_id, "key": reference.key, "name": reference.name}
+    )
+    
+    return {
+        "message": "Genome reference deleted successfully",
+        "deleted_index": deleted_index_info is not None,
+        "index_deletion_info": deleted_index_info
+    }
 
 @app.post("/api/settings/genome-references/{ref_id}/test", tags=["Settings"], summary="Test genome reference URL")
 async def test_genome_reference(
@@ -1443,6 +1665,45 @@ async def generate_presigned_url(
         
     except Exception as e:
         logger.error(f"Error generating presigned URL: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/storage/download/{bucket_type}/{object_name:path}", tags=["Storage"], summary="Download file from MinIO via backend")
+async def download_file_via_backend(
+    bucket_type: str,
+    object_name: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Download a file from MinIO through backend (bypasses presigned URL issues)"""
+    minio_service = get_minio_service()
+    bucket_name = minio_service.get_bucket(bucket_type)
+    
+    try:
+        # Get object info for content-type and size
+        obj_info = await minio_service.get_object_info(bucket_name, object_name)
+        
+        # Get stream generator
+        stream_generator = await minio_service.get_object_stream(bucket_name, object_name)
+        
+        # Determine filename for Content-Disposition
+        filename = object_name.split('/')[-1] or "download"
+        
+        return StreamingResponse(
+            stream_generator,
+            media_type=obj_info.get("content_type", "application/octet-stream"),
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{filename}\"",
+                "Content-Length": str(obj_info.get("size", 0))
+            }
+        )
+        
+    except S3Error as e:
+        if e.code == "NoSuchKey":
+            raise HTTPException(status_code=404, detail=f"File not found: {object_name}")
+        logger.error(f"MinIO error downloading {bucket_name}/{object_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error downloading file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

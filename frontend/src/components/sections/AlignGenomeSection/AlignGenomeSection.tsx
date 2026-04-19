@@ -17,14 +17,25 @@ import { Area } from '@/components/ui/Area'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui'
+import api from '@/lib/api'
 
 /* =========================================================
    🧬 TYPES (INDEXING ONLY)
 ========================================================= */
 
 interface PipelineConfig {
-  referenceGenome: 'hg38' | 'hg19'
+  referenceGenome: string
   uploadedFile?: File | null
+}
+
+interface GenomeReference {
+  id: number
+  key: string
+  name: string
+  species: string
+  build: string
+  url: string
+  is_active: boolean
 }
 
 interface ServiceConnection {
@@ -56,16 +67,8 @@ interface ReferenceGenomeOption {
   label: string
 }
 
-const referenceGenomes: ReferenceGenomeOption[] = [
-  {
-    id: 'hg38',
-    label: 'hg38 (GRCh38 - Ensembl)',
-  },
-  {
-    id: 'hg19',
-    label: 'hg19 (GRCh37 - UCSC)',
-  }
-]
+// Reference genomes are now loaded dynamically from the API
+// See availableGenomes state and useEffect above
 
 /* =========================================================
    ⚙️ COMPONENT
@@ -86,6 +89,8 @@ export function AlignGenomeSection() {
   const [indexedStatus, setIndexedStatus] = useState<Record<string, boolean>>({})
   const [isLoadingStatus, setIsLoadingStatus] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [availableGenomes, setAvailableGenomes] = useState<GenomeReference[]>([])
+  const [loadingGenomes, setLoadingGenomes] = useState(false)
   const logsContainerRef = useRef<HTMLDivElement>(null)
   const API_URL = 'http://localhost:8000'
 
@@ -112,6 +117,29 @@ export function AlignGenomeSection() {
   // Fetch indexed status on initial load
   useEffect(() => {
     refreshIndexedStatus()
+  }, [])
+
+  // Load available genome references from API
+  useEffect(() => {
+    const loadGenomes = async () => {
+      setLoadingGenomes(true)
+      try {
+        const result = await api.getGenomeReferences()
+        if (result.data) {
+          setAvailableGenomes(result.data)
+          // If no genome selected yet, select the first active one
+          if (!pipelineConfig.referenceGenome && result.data.length > 0) {
+            const firstActive = result.data.find(g => g.is_active) || result.data[0]
+            setPipelineConfig(prev => ({ ...prev, referenceGenome: firstActive.key }))
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load genome references:', error)
+      } finally {
+        setLoadingGenomes(false)
+      }
+    }
+    loadGenomes()
   }, [])
 
   // Auto-scroll logs container when new logs arrive
@@ -337,14 +365,22 @@ export function AlignGenomeSection() {
   }
 
   /* -----------------------------
-     UPDATE STATE
-  ----------------------------- */
+      UPDATE STATE
+   ----------------------------- */
   const updateConfig = (key: keyof PipelineConfig, value: string) => {
     setPipelineConfig((prev) => ({
       ...prev,
       [key]: value,
     }))
   }
+
+  // Transform available genomes to options for the dropdown
+  const genomeOptions: ReferenceGenomeOption[] = availableGenomes
+    .filter(genome => genome.is_active)
+    .map(genome => ({
+      id: genome.key,
+      label: `${genome.key} - ${genome.build} (${genome.species})`
+    }))
 
   /* =========================================================
      UI
@@ -424,11 +460,17 @@ export function AlignGenomeSection() {
                   updateConfig('referenceGenome', e.target.value)
                 }
               >
-                {referenceGenomes.map((g) => (
-                  <option key={g.id} value={g.id} className={indexedStatus[pipelineConfig.referenceGenome] ? 'bg-green-100 text-green-800' : ''}>
-                    {g.label}
-                  </option>
-                ))}
+                {loadingGenomes ? (
+                  <option value="">Loading genome references...</option>
+                ) : genomeOptions.length > 0 ? (
+                  genomeOptions.map((g) => (
+                    <option key={g.id} value={g.id} className={indexedStatus[pipelineConfig.referenceGenome] ? 'bg-green-100 text-green-800' : ''}>
+                      {g.label}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No genome references available</option>
+                )}
               </Select>
             </div>
 

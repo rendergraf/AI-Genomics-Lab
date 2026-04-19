@@ -10,6 +10,7 @@ import uuid
 import logging
 import select
 import time
+import shlex
 from typing import Optional, Dict, Any, Generator
 
 logging.basicConfig(level=logging.INFO)
@@ -20,7 +21,7 @@ class NextflowRunner:
     def __init__(self):
         pass
     
-    def run_genome_indexing(self, genome_id: str, output_dir: Optional[str] = None, job_id: Optional[str] = None, minio_bucket: str = "genomics", minio_prefix: str = "reference_genome") -> Dict[str, Any]:
+    def run_genome_indexing(self, genome_id: str, output_dir: Optional[str] = None, job_id: Optional[str] = None, minio_bucket: str = "genomics", minio_prefix: str = "reference_genome", read_length: Optional[int] = None, genome_url: Optional[str] = None) -> Dict[str, Any]:
         job_id = job_id if job_id is not None else str(uuid.uuid4())
         log_file = f"/datasets/logs/nextflow-{job_id}.log"
         reports_dir = f"/datasets/reports/{job_id}"
@@ -39,9 +40,13 @@ class NextflowRunner:
         
         nextflow_cmd = f"nextflow run /bio-pipeline/{pipeline_file} -ansi-log false"
         nextflow_cmd += f" --genome_id {genome_id}"
+        if genome_url:
+            nextflow_cmd += f" --genome_url {shlex.quote(genome_url)}"
         nextflow_cmd += f" --output_dir {output_dir}"
         nextflow_cmd += f" --minio_bucket {minio_bucket}"
         nextflow_cmd += f" --minio_prefix {minio_prefix}"
+        if read_length is not None:
+            nextflow_cmd += f" --read_length {read_length}"
         nextflow_cmd += f" -work-dir /nextflow-work/{job_id}"
         
         # Execute Nextflow inside bio-pipeline container

@@ -9,22 +9,22 @@ nextflow.enable.dsl = 2
 //  3. strobealign.sti - Strobealign index
 
 params.genome_id = "hg38"
+params.genome_url = null
 params.output_dir = "/datasets/reference_genome"
-params.threads = 4
+params.threads = null
+params.read_length = 150
 params.minio_bucket = "genomics"
 params.minio_prefix = "reference_genome"
 
-def GENOME_URLS = [
-    "hg38": "https://ftp.ensembl.org/pub/current_fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz",
-    "hg38-test": "https://ftp.ensembl.org/pub/current_fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.chromosome.21.fa.gz",
-    "hg19": "https://hgdownload.soe.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz"
-]
+// Auto-detect threads if not provided
+def available_cpus = Runtime.runtime.availableProcessors()
+params.threads = params.threads ?: Math.max(2, (available_cpus * 0.75).toInteger())
 
 workflow {
-    def url = GENOME_URLS[params.genome_id]
-    if (!url) {
-        error "Unknown genome: ${params.genome_id}"
+    if (!params.genome_url) {
+        error "Genome URL is required. Provide --genome_url parameter."
     }
+    def url = params.genome_url
     
     // Download and prepare genome
     download_and_prepare_genome(url, params.genome_id)
@@ -58,7 +58,7 @@ process download_and_prepare_genome {
         path("${genome_id}.fa.gz"), emit: bgzip_fasta
         path("${genome_id}.fa.gz.fai"), emit: fai_index
         path("${genome_id}.fa.gz.gzi"), emit: gzi_index
-        path("${genome_id}.fa.gz.sti"), emit: strobealign_index
+        path("${genome_id}.fa.gz.r${params.read_length}.sti"), emit: strobealign_index
         path("${genome_id}_prep_results.txt"), emit: results
     
     script:
@@ -99,22 +99,21 @@ process download_and_prepare_genome {
     # Step 4: Create Strobealign index (.sti)
     # This creates a general genome index, not sample-specific
     echo "🎯 Creating Strobealign index (general genome index)..."
-    strobealign -i -r 150 "${params.output_dir}/${genome_id}.fa.gz"
+    strobealign -i -r ${params.read_length} "${params.output_dir}/${genome_id}.fa.gz"
     
-    # Rename strobealign index from .r150.sti to .sti
-    if [ -f "${params.output_dir}/${genome_id}.fa.gz.r150.sti" ]; then
-        mv "${params.output_dir}/${genome_id}.fa.gz.r150.sti" "${params.output_dir}/${genome_id}.fa.gz.sti"
-        echo "✅ Strobealign index created (renamed .r150.sti to .sti)"
+    # Verify strobealign index was created with read length in filename
+    if [ -f "${params.output_dir}/${genome_id}.fa.gz.r${params.read_length}.sti" ]; then
+        echo "✅ Strobealign index created: ${genome_id}.fa.gz.r${params.read_length}.sti"
     else
-        echo "⚠️  STI file not found with expected name pattern"
+        echo "⚠️  STI file not found with expected name pattern .r${params.read_length}.sti"
     fi
-           
+            
     # Copy files to work directory for Nextflow output
     cp "${params.output_dir}/${genome_id}.fa.gz" .
     cp "${params.output_dir}/${genome_id}.fa.gz.fai" .
     cp "${params.output_dir}/${genome_id}.fa.gz.gzi" .
-    if [ -f "${params.output_dir}/${genome_id}.fa.gz.sti" ]; then
-        cp "${params.output_dir}/${genome_id}.fa.gz.sti" .
+    if [ -f "${params.output_dir}/${genome_id}.fa.gz.r${params.read_length}.sti" ]; then
+        cp "${params.output_dir}/${genome_id}.fa.gz.r${params.read_length}.sti" .
     else
         echo "⚠️  STI file not found in ${params.output_dir}"
     fi
@@ -129,7 +128,7 @@ process download_and_prepare_genome {
     echo "  - ${params.output_dir}/${genome_id}.fa.gz" >> "${genome_id}_prep_results.txt"
     echo "  - ${params.output_dir}/${genome_id}.fa.gz.fai" >> "${genome_id}_prep_results.txt"
     echo "  - ${params.output_dir}/${genome_id}.fa.gz.gzi" >> "${genome_id}_prep_results.txt"
-    echo "  - ${params.output_dir}/${genome_id}.fa.gz.sti" >> "${genome_id}_prep_results.txt"
+    echo "  - ${params.output_dir}/${genome_id}.fa.gz.r${params.read_length}.sti" >> "${genome_id}_prep_results.txt"
     
     echo ""
     echo "✅ PIPELINE 1 COMPLETE"
@@ -190,13 +189,15 @@ process upload_to_minio {
             url="s3://${params.minio_bucket}/\$object_name"
             
             # Store URL based on file type
-            if [[ "\$filename" == *".fa.gz" && ! "\$filename" == *".fai" && ! "\$filename" == *".gzi" && ! "\$filename" == *".sti" ]]; then
+            if [[ "\$filename" == *.fa.gz && ! "\$filename" == *.fa.gz.fai && ! "\$filename" == *.fa.gz.gzi && ! "\$filename" == *.fa.gz.sti && ! "\$filename" == *.fa.gz.r*.sti ]]; then
                 bgzip_url="\$url"
-            elif [[ "\$filename" == *".fa.gz.fai" ]]; then
+            elif [[ "\$filename" == *.fa.gz.fai ]]; then
                 fai_url="\$url"
-            elif [[ "\$filename" == *".fa.gz.gzi" ]]; then
+            elif [[ "\$filename" == *.fa.gz.gzi ]]; then
                 gzi_url="\$url"
-            elif [[ "\$filename" == *".fa.gz.sti" ]]; then
+            elif [[ "\$filename" == *.fa.gz.sti ]]; then
+                sti_url="\$url"
+            elif [[ "\$filename" == *.fa.gz.r*.sti ]]; then
                 sti_url="\$url"
             fi
             echo "✅ Uploaded: \$url" >&2
@@ -235,6 +236,6 @@ workflow.onComplete {
     println "1. ${output_dir}/${genome_id}.fa.gz (bgzip compressed FASTA)"
     println "2. ${output_dir}/${genome_id}.fa.gz.fai (FASTA index)"
     println "3. ${output_dir}/${genome_id}.fa.gz.gzi (GZI index)"
-    println "4. ${output_dir}/${genome_id}.fa.gz.sti (Strobealign index)"
+    println "4. ${output_dir}/${genome_id}.fa.gz.r${params.read_length}.sti (Strobealign index)"
     println "=========================================="
 }

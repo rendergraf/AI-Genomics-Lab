@@ -218,14 +218,7 @@ export function StorageSection() {
 
   const handleDownloadFile = async (objectName: string) => {
     try {
-      const result = await api.generatePresignedUrl('reference', objectName)
-      if (result.data && result.data.presigned_url) {
-        // Open the presigned URL in a new tab to download the file
-        window.open(result.data.presigned_url, '_blank')
-      } else {
-        console.error('Error generating presigned URL:', result.error)
-        alert('Failed to generate download link')
-      }
+      await api.downloadFile('reference', objectName)
     } catch (error) {
       console.error('Error downloading file:', error)
       alert('Failed to download file')

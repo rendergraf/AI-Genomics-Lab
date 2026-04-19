@@ -229,9 +229,27 @@ class DatabaseService:
     async def initialize_schema(self) -> None:
         """Create tables if they don't exist"""
         async with self.pool.acquire() as conn:
-            # Create reference_genomes table
+            # Migrate old table names if they exist
+            # Rename reference_genomes -> indexed_genomes if old exists and new doesn't
             await conn.execute("""
-                CREATE TABLE IF NOT EXISTS reference_genomes (
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'reference_genomes') 
+                    AND NOT EXISTS (SELECT FROM pg_tables WHERE tablename = 'indexed_genomes') THEN
+                        ALTER TABLE reference_genomes RENAME TO indexed_genomes;
+                    END IF;
+                    
+                    IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'genome_references') 
+                    AND NOT EXISTS (SELECT FROM pg_tables WHERE tablename = 'genome_sources') THEN
+                        ALTER TABLE genome_references RENAME TO genome_sources;
+                    END IF;
+                END
+                $$;
+            """)
+            
+            # Create reference_genomes table (now indexed_genomes)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS indexed_genomes (
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(255) NOT NULL UNIQUE,
                     species VARCHAR(255) NOT NULL,
@@ -253,7 +271,7 @@ class DatabaseService:
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(255) NOT NULL,
                     sample_type VARCHAR(50) NOT NULL DEFAULT 'paired-end',
-                    reference_genome_id INTEGER REFERENCES reference_genomes(id),
+                    reference_genome_id INTEGER REFERENCES indexed_genomes(id),
                     r1_path VARCHAR(512),
                     r2_path VARCHAR(512),
                     bam_path VARCHAR(512),
@@ -311,9 +329,9 @@ class DatabaseService:
                 )
             """)
             
-            # Create genome_references table (enhanced version)
+            # Create genome_sources table (enhanced version)
             await conn.execute("""
-                CREATE TABLE IF NOT EXISTS genome_references (
+                CREATE TABLE IF NOT EXISTS genome_sources (
                     id SERIAL PRIMARY KEY,
                     key VARCHAR(50) UNIQUE NOT NULL,
                     name VARCHAR(255) NOT NULL,
@@ -419,12 +437,14 @@ class DatabaseService:
             """)
             
             # Seed initial pipeline settings
+            # Delete obsolete settings first
+            await conn.execute("""
+                DELETE FROM pipeline_settings WHERE setting_key IN ('strobealign_r', 'max_threads')
+            """)
             await conn.execute("""
                 INSERT INTO pipeline_settings (setting_key, setting_value, data_type, description) 
                 VALUES 
-                    ('default_read_length', '150', 'integer', 'Default read length for alignment'),
-                    ('strobealign_r', '150', 'integer', 'Strobealign read length parameter'),
-                    ('max_threads', '32', 'integer', 'Maximum threads for pipeline execution')
+                    ('default_read_length', '150', 'integer', 'Read length for alignment (bp)')
                 ON CONFLICT (setting_key) DO NOTHING
             """)
             
@@ -442,7 +462,7 @@ class DatabaseService:
         """Create a new reference genome entry"""
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
-                INSERT INTO reference_genomes (name, species, build, file_path, status)
+                INSERT INTO indexed_genomes (name, species, build, file_path, status)
                 VALUES ($1, $2, $3, $4, 'uploaded')
                 RETURNING id, name, species, build, file_path, gz_path, fai_path, gzi_path, sti_path, status, created_at, updated_at
             """, name, species, build, file_path)
@@ -454,7 +474,7 @@ class DatabaseService:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT id, name, species, build, file_path, gz_path, fai_path, gzi_path, sti_path, status, created_at, updated_at
-                FROM reference_genomes
+                FROM indexed_genomes
                 ORDER BY created_at DESC
             """)
             
@@ -465,7 +485,7 @@ class DatabaseService:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 SELECT id, name, species, build, file_path, gz_path, fai_path, gzi_path, sti_path, status, created_at, updated_at
-                FROM reference_genomes
+                FROM indexed_genomes
                 WHERE id = $1
             """, genome_id)
             
@@ -476,7 +496,7 @@ class DatabaseService:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 SELECT id, name, species, build, file_path, gz_path, fai_path, gzi_path, sti_path, status, created_at, updated_at
-                FROM reference_genomes
+                FROM indexed_genomes
                 WHERE name = $1
             """, name)
             
@@ -494,7 +514,7 @@ class DatabaseService:
         """Update reference genome status and paths"""
         async with self.pool.acquire() as conn:
             # Build dynamic query
-            query = "UPDATE reference_genomes SET status = $2, updated_at = CURRENT_TIMESTAMP"
+            query = "UPDATE indexed_genomes SET status = $2, updated_at = CURRENT_TIMESTAMP"
             params = [genome_id, status]
             param_count = 2
             
@@ -527,7 +547,7 @@ class DatabaseService:
         """Delete a reference genome"""
         async with self.pool.acquire() as conn:
             result = await conn.execute("""
-                DELETE FROM reference_genomes WHERE id = $1
+                DELETE FROM indexed_genomes WHERE id = $1
             """, genome_id)
             
             return result == "DELETE 1"
@@ -701,6 +721,19 @@ class DatabaseService:
             row = await conn.fetchrow(query, *params)
             return PipelineJob(**dict(row)) if row else None
     
+    async def delete_pipeline_jobs_by_genome(self, genome_id: str) -> int:
+        """Delete pipeline jobs related to a specific genome ID"""
+        async with self.pool.acquire() as conn:
+            # Look for jobs where parameters contain the genome_id
+            # Parameters are stored as JSON string: {"genome_id": "hg38", ...}
+            result = await conn.execute("""
+                DELETE FROM pipeline_jobs 
+                WHERE parameters LIKE $1
+            """, f'%"genome_id": "{genome_id}"%')
+            
+            # Return number of deleted rows
+            return int(result.split()[1]) if result else 0
+    
     # ==================== USERS ====================
     
     async def create_user(
@@ -867,7 +900,7 @@ class DatabaseService:
         """Create a new genome reference entry"""
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
-                INSERT INTO genome_references (key, name, species, build, url, is_active, created_by)
+                INSERT INTO genome_sources (key, name, species, build, url, is_active, created_by)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING id, key, name, species, build, url, is_active, created_by, created_at, updated_at
             """, key, name, species, build, url, is_active, created_by)
@@ -879,7 +912,7 @@ class DatabaseService:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT id, key, name, species, build, url, is_active, created_by, created_at, updated_at
-                FROM genome_references
+                FROM genome_sources
                 ORDER BY created_at DESC
             """)
             
@@ -890,7 +923,7 @@ class DatabaseService:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 SELECT id, key, name, species, build, url, is_active, created_by, created_at, updated_at
-                FROM genome_references
+                FROM genome_sources
                 WHERE id = $1
             """, ref_id)
             
@@ -901,7 +934,7 @@ class DatabaseService:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 SELECT id, key, name, species, build, url, is_active, created_by, created_at, updated_at
-                FROM genome_references
+                FROM genome_sources
                 WHERE key = $1
             """, key)
             
@@ -919,7 +952,7 @@ class DatabaseService:
     ) -> Optional[GenomeReference]:
         """Update genome reference"""
         async with self.pool.acquire() as conn:
-            query = "UPDATE genome_references SET updated_at = CURRENT_TIMESTAMP"
+            query = "UPDATE genome_sources SET updated_at = CURRENT_TIMESTAMP"
             params = [ref_id]
             param_count = 1
             
@@ -962,7 +995,7 @@ class DatabaseService:
         """Delete a genome reference"""
         async with self.pool.acquire() as conn:
             result = await conn.execute("""
-                DELETE FROM genome_references WHERE id = $1
+                DELETE FROM genome_sources WHERE id = $1
             """, ref_id)
             
             return result == "DELETE 1"
@@ -1216,30 +1249,30 @@ class DatabaseService:
         """Get database statistics"""
         async with self.pool.acquire() as conn:
             # Original statistics
-            genome_count = await conn.fetchval("SELECT COUNT(*) FROM reference_genomes")
-            ready_genomes = await conn.fetchval("SELECT COUNT(*) FROM reference_genomes WHERE status = 'ready'")
+            genome_count = await conn.fetchval("SELECT COUNT(*) FROM indexed_genomes")
+            ready_genomes = await conn.fetchval("SELECT COUNT(*) FROM indexed_genomes WHERE status = 'ready'")
             sample_count = await conn.fetchval("SELECT COUNT(*) FROM samples")
             completed_samples = await conn.fetchval("SELECT COUNT(*) FROM samples WHERE status = 'completed'")
             
             # New statistics
             user_count = await conn.fetchval("SELECT COUNT(*) FROM users")
             active_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_active = TRUE")
-            genome_ref_count = await conn.fetchval("SELECT COUNT(*) FROM genome_references")
-            active_genome_refs = await conn.fetchval("SELECT COUNT(*) FROM genome_references WHERE is_active = TRUE")
+            genome_ref_count = await conn.fetchval("SELECT COUNT(*) FROM genome_sources")
+            active_genome_refs = await conn.fetchval("SELECT COUNT(*) FROM genome_sources WHERE is_active = TRUE")
             pipeline_settings_count = await conn.fetchval("SELECT COUNT(*) FROM pipeline_settings")
             ai_provider_settings_count = await conn.fetchval("SELECT COUNT(*) FROM ai_provider_settings")
             active_ai_providers = await conn.fetchval("SELECT COUNT(*) FROM ai_provider_settings WHERE is_active = TRUE")
             audit_logs_count = await conn.fetchval("SELECT COUNT(*) FROM audit_logs")
             
             return {
-                "total_reference_genomes": genome_count,
-                "ready_reference_genomes": ready_genomes,
+                "total_indexed_genomes": genome_count,
+                "ready_indexed_genomes": ready_genomes,
                 "total_samples": sample_count,
                 "completed_samples": completed_samples,
                 "total_users": user_count,
                 "active_users": active_users,
-                "total_genome_references": genome_ref_count,
-                "active_genome_references": active_genome_refs,
+                "total_genome_sources": genome_ref_count,
+                "active_genome_sources": active_genome_refs,
                 "pipeline_settings": pipeline_settings_count,
                 "ai_provider_settings": ai_provider_settings_count,
                 "active_ai_providers": active_ai_providers,

@@ -44,7 +44,7 @@ const tabs = [
 export default function SettingsPage() {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<SettingsTabType>('genome-references')
-  const [isLoading, setIsLoading] = useState(false)
+
   const [checkingAuth, setCheckingAuth] = useState(true)
 
   useEffect(() => {
@@ -86,6 +86,18 @@ export default function SettingsPage() {
   const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Genome references form state
+  const [showGenomeForm, setShowGenomeForm] = useState(false)
+  const [editingGenome, setEditingGenome] = useState<any>(null)
+  const [genomeFormData, setGenomeFormData] = useState({
+    key: '',
+    name: '',
+    species: '',
+    build: '',
+    url: '',
+    is_active: true
+  })
 
   // Load data based on active tab
   useEffect(() => {
@@ -144,38 +156,124 @@ export default function SettingsPage() {
     loadData()
   }, [activeTab, checkingAuth])
 
-  const handleTestConnection = async (type: 'genome' | 'ai-provider') => {
-    setIsLoading(true)
-    // TODO: Implement actual connection tests
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    alert(`${type === 'genome' ? 'Genome URL' : 'AI Provider'} connection test would be implemented here`)
-    setIsLoading(false)
+  const handleTestConnection = async (type: 'genome' | 'ai-provider', id?: number) => {
+    setLoading(true)
+    try {
+      if (type === 'genome' && id) {
+        const result = await api.testGenomeReference(id)
+        if (result.error) {
+          alert(`Genome URL test failed: ${result.error}`)
+        } else {
+          alert(`Genome URL test: ${result.data?.message || 'Success'}`)
+        }
+      } else if (type === 'ai-provider') {
+        const result = await api.testAIProvider(aiProvider.provider, aiProvider.model)
+        if (result.error) {
+          alert(`AI Provider test failed: ${result.error}`)
+        } else {
+          alert(`AI Provider test: ${result.data?.message || 'Success'}`)
+        }
+      }
+    } catch (error: any) {
+      alert(`Connection test failed: ${error.message || error}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Genome references CRUD handlers
+  const handleAddGenomeReference = () => {
+    setEditingGenome(null)
+    setGenomeFormData({
+      key: '',
+      name: '',
+      species: '',
+      build: '',
+      url: '',
+      is_active: true
+    })
+    setShowGenomeForm(true)
+  }
+
+  const handleEditGenomeReference = (genome: any) => {
+    setEditingGenome(genome)
+    setGenomeFormData({
+      key: genome.key,
+      name: genome.name,
+      species: genome.species || '',
+      build: genome.build || '',
+      url: genome.url,
+      is_active: genome.is_active
+    })
+    setShowGenomeForm(true)
+  }
+
+  const handleDeleteGenomeReference = async (genomeId: number) => {
+    if (!confirm('Are you sure you want to delete this genome reference? This will also delete any associated index files.')) {
+      return
+    }
+    
+    setLoading(true)
+    try {
+      const result = await api.deleteGenomeReference(genomeId)
+      if (result.error) {
+        alert(`Delete failed: ${result.error}`)
+      } else {
+        alert('Genome reference deleted successfully')
+        // Refresh the list
+        const refs = await api.getGenomeReferences()
+        if (refs.data) setGenomeReferences(refs.data)
+      }
+    } catch (error: any) {
+      alert(`Delete failed: ${error.message || error}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSaveGenomeReference = async () => {
+    if (!genomeFormData.key.trim() || !genomeFormData.name.trim() || !genomeFormData.url.trim()) {
+      alert('Key, Name, and URL are required')
+      return
+    }
+    
+    setLoading(true)
+    try {
+      let result
+      if (editingGenome) {
+        result = await api.updateGenomeReference(editingGenome.id, genomeFormData)
+      } else {
+        result = await api.createGenomeReference(genomeFormData)
+      }
+      
+      if (result.error) {
+        alert(`Save failed: ${result.error}`)
+      } else {
+        alert(`Genome reference ${editingGenome ? 'updated' : 'created'} successfully`)
+        setShowGenomeForm(false)
+        // Refresh the list
+        const refs = await api.getGenomeReferences()
+        if (refs.data) setGenomeReferences(refs.data)
+      }
+    } catch (error: any) {
+      alert(`Save failed: ${error.message || error}`)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleSaveSettings = async (section: SettingsTabType) => {
-    setIsLoading(true)
+    setLoading(true)
     try {
       switch (section) {
         case 'pipeline':
-          // Update each pipeline setting
-          const updates = []
+          // Update pipeline setting (only default_read_length)
           if (pipelineSettings.default_read_length) {
-            updates.push(api.updatePipelineSetting('default_read_length', {
+            await api.updatePipelineSetting('default_read_length', {
               setting_value: pipelineSettings.default_read_length.value.toString()
-            }))
+            })
+            alert('Pipeline settings saved successfully')
           }
-          if (pipelineSettings.strobealign_r) {
-            updates.push(api.updatePipelineSetting('strobealign_r', {
-              setting_value: pipelineSettings.strobealign_r.value.toString()
-            }))
-          }
-          if (pipelineSettings.max_threads) {
-            updates.push(api.updatePipelineSetting('max_threads', {
-              setting_value: pipelineSettings.max_threads.value.toString()
-            }))
-          }
-          await Promise.all(updates)
-          alert('Pipeline settings saved successfully')
           break
         case 'ai-providers':
           // TODO: implement AI provider save
@@ -198,7 +296,7 @@ export default function SettingsPage() {
     } catch (error: any) {
       alert(`Error saving settings: ${error.message || 'Unknown error'}`)
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
   }
 
@@ -209,10 +307,76 @@ export default function SettingsPage() {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-semibold">Genome References</h3>
-              <Button size="lg" colorScheme="primary">
-                Add New Reference
-              </Button>
+               <Button size="lg" colorScheme="primary" onClick={handleAddGenomeReference} disabled={loading}>
+                 Add New Reference
+               </Button>
             </div>
+            
+            {showGenomeForm && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-card rounded-lg p-6 max-w-md w-full">
+                  <h3 className="text-xl font-semibold mb-4">{editingGenome ? 'Edit' : 'Add'} Genome Reference</h3>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Key (unique identifier)</label>
+                      <Input
+                        value={genomeFormData.key}
+                        onChange={(e) => setGenomeFormData({...genomeFormData, key: e.target.value})}
+                        placeholder="e.g., hg38"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Name</label>
+                      <Input
+                        value={genomeFormData.name}
+                        onChange={(e) => setGenomeFormData({...genomeFormData, name: e.target.value})}
+                        placeholder="e.g., Homo sapiens GRCh38"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Species</label>
+                      <Input
+                        value={genomeFormData.species}
+                        onChange={(e) => setGenomeFormData({...genomeFormData, species: e.target.value})}
+                        placeholder="e.g., Homo sapiens"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Build</label>
+                      <Input
+                        value={genomeFormData.build}
+                        onChange={(e) => setGenomeFormData({...genomeFormData, build: e.target.value})}
+                        placeholder="e.g., GRCh38"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">URL</label>
+                      <Input
+                        value={genomeFormData.url}
+                        onChange={(e) => setGenomeFormData({...genomeFormData, url: e.target.value})}
+                        placeholder="https://example.com/genome.fa.gz"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="is_active"
+                        checked={genomeFormData.is_active}
+                        onChange={(e) => setGenomeFormData({...genomeFormData, is_active: e.target.checked})}
+                        className="rounded border-gray-300 text-primary focus:ring-primary"
+                      />
+                      <label htmlFor="is_active" className="text-sm font-medium">Active</label>
+                    </div>
+                  </div>
+                  <div className="flex justify-end space-x-3 mt-6">
+                    <Button variant="outline" onClick={() => setShowGenomeForm(false)} disabled={loading}>Cancel</Button>
+                    <Button colorScheme="primary" onClick={handleSaveGenomeReference} disabled={loading}>
+                      {loading ? 'Saving...' : (editingGenome ? 'Update' : 'Create')}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
             
             {loading ? (
               <div className="text-center py-8">
@@ -262,8 +426,8 @@ export default function SettingsPage() {
                           <Button 
                             size="sm" 
                             variant="outline"
-                            onClick={() => handleTestConnection('genome')}
-                            disabled={isLoading}
+                            onClick={() => handleTestConnection('genome', genome.id)}
+                            disabled={loading}
                           >
                             <Globe className="h-4 w-4 mr-2" />
                             Test URL
@@ -271,8 +435,8 @@ export default function SettingsPage() {
                         </div>
                       </CardContent>
                       <CardFooter className="flex justify-between">
-                        <Button size="sm">Edit</Button>
-                        <Button size="sm">Delete</Button>
+                         <Button size="sm" onClick={() => handleEditGenomeReference(genome)} disabled={loading}>Edit</Button>
+                         <Button size="sm" colorScheme="danger" onClick={() => handleDeleteGenomeReference(genome.id)} disabled={loading}>Delete</Button>
                       </CardFooter>
                     </Card>
                   ))}
@@ -293,6 +457,9 @@ export default function SettingsPage() {
         )
 
       case 'pipeline':
+        const PRESETS = [75, 100, 150, 250, 300];
+        const currentValue = pipelineSettings.default_read_length?.value ?? 150;
+        const isCustom = !PRESETS.includes(Number(currentValue)) || currentValue === '';
         return (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold">Pipeline Configuration</h3>
@@ -323,65 +490,59 @@ export default function SettingsPage() {
                     <CardDescription>Settings for read alignment and variant calling</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">Default Read Length</label>
+                        <label className="text-sm font-medium">Read Length (bp)</label>
                         <Select 
-                          value={pipelineSettings.default_read_length?.value || 150}
+                          value={isCustom ? 'custom' : currentValue}
                           onChange={(e) => {
-                            const newSettings = {...pipelineSettings}
-                            if (!newSettings.default_read_length) newSettings.default_read_length = {}
-                            newSettings.default_read_length.value = e.target.value
-                            setPipelineSettings(newSettings)
-                          }}
-                        >
-                          <option value={75}>75 bp</option>
-                          <option value={100}>100 bp</option>
-                          <option value={150}>150 bp</option>
-                          <option value={250}>250 bp</option>
-                        </Select>
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Strobealign R</label>
-                        <Select 
-                          value={pipelineSettings.strobealign_r?.value || 150}
-                          onChange={(e) => {
-                            const newSettings = {...pipelineSettings}
-                            if (!newSettings.strobealign_r) newSettings.strobealign_r = {}
-                            newSettings.strobealign_r.value = e.target.value
-                            setPipelineSettings(newSettings)
+                            const newValue = e.target.value;
+                            const newSettings = {...pipelineSettings};
+                            if (!newSettings.default_read_length) newSettings.default_read_length = {};
+                            if (newValue === 'custom') {
+                              newSettings.default_read_length.value = '';
+                            } else {
+                              newSettings.default_read_length.value = Number(newValue);
+                            }
+                            setPipelineSettings(newSettings);
                           }}
                         >
                           <option value={75}>75</option>
                           <option value={100}>100</option>
                           <option value={150}>150</option>
                           <option value={250}>250</option>
+                          <option value={300}>300</option>
+                          <option value="custom">Custom</option>
                         </Select>
                       </div>
-                      
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Max Threads</label>
-                        <Input 
-                          type="number"
-                          value={pipelineSettings.max_threads?.value || 32}
-                          onChange={(e) => {
-                            const newSettings = {...pipelineSettings}
-                            if (!newSettings.max_threads) newSettings.max_threads = {}
-                            newSettings.max_threads.value = e.target.value
-                            setPipelineSettings(newSettings)
-                          }}
-                          min={1}
-                          max={64}
-                        />
-                      </div>
+                      {isCustom && (
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Custom Value (bp)</label>
+                          <Input
+                            type="number"
+                            value={currentValue}
+                            onChange={(e) => {
+                              const newSettings = {...pipelineSettings};
+                              if (!newSettings.default_read_length) newSettings.default_read_length = {};
+                              newSettings.default_read_length.value = e.target.value;
+                              setPipelineSettings(newSettings);
+                            }}
+                            min={1}
+                            max={1000}
+                            placeholder="Enter custom read length"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      <p>Select a standard read length or choose Custom to enter a specific value.</p>
                     </div>
                   </CardContent>
-                  <CardFooter>
+                   <CardFooter>
                     <Button 
                       colorScheme="primary"
                       onClick={() => handleSaveSettings('pipeline')}
-                      loading={isLoading}
+                      loading={loading}
                       loadingText="Saving..."
                     >
                       Save Pipeline Settings
@@ -392,8 +553,8 @@ export default function SettingsPage() {
                 <Area>
                   <h4 className="text-lg font-semibold mb-4">Validation Rules</h4>
                   <ul className="list-disc pl-5 space-y-2 text-sm text-muted-foreground">
-                    <li>Read length must be a standard value (75, 100, 150, 250)</li>
-                    <li>Thread count cannot exceed available system cores</li>
+                    <li>Read length can be a standard value (75, 100, 150, 250, 300) or any custom positive integer</li>
+                    <li>Thread count is automatically determined based on available system cores</li>
                     <li>All numeric values must be positive integers</li>
                     <li>Changes require admin privileges</li>
                   </ul>
@@ -491,22 +652,22 @@ export default function SettingsPage() {
                       <Button 
                         variant="outline"
                         onClick={() => handleTestConnection('ai-provider')}
-                        disabled={isLoading}
+                        disabled={loading}
                       >
                         <Key className="h-4 w-4 mr-2" />
                         Test Connection
                       </Button>
                     </div>
                   </CardContent>
-                  <CardFooter className="flex justify-between">
-                    <Button 
-                      colorScheme="primary"
-                      onClick={() => handleSaveSettings('ai-providers')}
-                      loading={isLoading}
-                      loadingText="Saving..."
-                    >
-                      Save AI Settings
-                    </Button>
+                   <CardFooter className="flex justify-between">
+                     <Button 
+                       colorScheme="primary"
+                       onClick={() => handleSaveSettings('ai-providers')}
+                       loading={loading}
+                       loadingText="Saving..."
+                     >
+                       Save AI Settings
+                     </Button>
                     <Button 
                       variant="outline"
                       onClick={() => setAiProvider({...aiProvider, isActive: !aiProvider.isActive})}
@@ -644,16 +805,16 @@ export default function SettingsPage() {
                     </label>
                   </div>
                 </CardContent>
-                <CardFooter>
-                  <Button 
-                    colorScheme="primary"
-                    onClick={() => handleSaveSettings('user-preferences')}
-                    loading={isLoading}
-                    loadingText="Saving..."
-                  >
-                    Save Preferences
-                  </Button>
-                </CardFooter>
+                 <CardFooter>
+                   <Button 
+                     colorScheme="primary"
+                     onClick={() => handleSaveSettings('user-preferences')}
+                     loading={loading}
+                     loadingText="Saving..."
+                   >
+                     Save Preferences
+                   </Button>
+                 </CardFooter>
               </Card>
             )}
           </div>
