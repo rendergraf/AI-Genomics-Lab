@@ -464,7 +464,83 @@ class DatabaseService:
                     description = EXCLUDED.description
             """)
             
-            logger.info("Database schema initialized with authentication and settings tables")
+            # Seed default genome sources (remote genomes)
+            await conn.execute("""
+                INSERT INTO genome_sources (key, name, species, build, url, is_active) 
+                VALUES 
+                    (
+                        'hg38',
+                        'Human Genome (GRCh38)',
+                        'Homo sapiens',
+                        'GRCh38',
+                        'https://ftp.ensembl.org/pub/current_fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz',
+                        TRUE
+                    ),
+                    (
+                        'hg19',
+                        'Homo sapiens GRCh37 (hg19)',
+                        'Homo sapiens',
+                        'GRCh37',
+                        'https://hgdownload.soe.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz',
+                        TRUE
+                    ),
+                    (
+                        'ecoli_k12',
+                        'Escherichia coli K-12 MG1655',
+                        'Escherichia coli',
+                        'ASM584v2',
+                        'https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/005/845/GCF_000005845.2_ASM584v2/GCF_000005845.2_ASM584v2_genomic.fna.gz',
+                        TRUE
+                    ),
+                    (
+                        'bacillus_168',
+                        'Bacillus subtilis 168',
+                        'Bacillus subtilis',
+                        'ASM904v1',
+                        'https://ftp.ensemblgenomes.ebi.ac.uk/pub/bacteria/release-62/fasta/bacteria_0_collection/bacillus_subtilis_subsp_subtilis_str_168_gca_000009045/dna/Bacillus_subtilis_subsp_subtilis_str_168_gca_000009045.ASM904v1.dna.chromosome.Chromosome.fa.gz',
+                        TRUE
+                    ),
+                    (
+                        'pseudomonas_pao1',
+                        'Pseudomonas aeruginosa PAO1',
+                        'Pseudomonas aeruginosa',
+                        'ASM676v1',
+                        'https://ftp.ensemblgenomes.ebi.ac.uk/pub/bacteria/release-62/fasta/bacteria_5_collection/pseudomonas_aeruginosa_pao1_gca_000006765/dna/Pseudomonas_aeruginosa_pao1_gca_000006765.ASM676v1_.dna.toplevel.fa.gz',
+                        TRUE
+                    )
+                ON CONFLICT (key) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    species = EXCLUDED.species,
+                    build = EXCLUDED.build,
+                    url = EXCLUDED.url,
+                    is_active = EXCLUDED.is_active,
+                    updated_at = CURRENT_TIMESTAMP
+            """)
+            
+            # Seed AI provider settings (inactive by default)
+            await conn.execute("""
+                INSERT INTO ai_provider_settings (provider, model, api_key_encrypted, base_url, is_active)
+                VALUES
+                    ('openai', 'gpt-4', NULL, 'https://api.openai.com/v1', FALSE),
+                    ('openai', 'gpt-3.5-turbo', NULL, 'https://api.openai.com/v1', FALSE),
+                    ('anthropic', 'claude-3-opus', NULL, 'https://api.anthropic.com', FALSE),
+                    ('anthropic', 'claude-3-sonnet', NULL, 'https://api.anthropic.com', FALSE),
+                    ('google', 'gemini-pro', NULL, 'https://generativelanguage.googleapis.com', FALSE),
+                    ('local', 'llama2', NULL, 'http://localhost:11434', FALSE)
+                ON CONFLICT (provider, model) DO UPDATE SET
+                    base_url = EXCLUDED.base_url,
+                    updated_at = CURRENT_TIMESTAMP
+            """)
+            
+            # Seed UI preferences for admin user (if admin exists)
+            await conn.execute("""
+                INSERT INTO ui_preferences (user_id, language, timezone, theme, display_options)
+                SELECT id, 'en', 'UTC', 'light', '{"showTutorial": true, "density": "comfortable", "fontSize": "medium"}'::jsonb
+                FROM users WHERE email = 'admin@company.com'
+                ON CONFLICT (user_id) DO NOTHING
+            """)
+            
+            logger.info("Database schema initialized with authentication, settings, genomes, AI providers, and UI preferences")
     
     # ==================== REFERENCE GENOMES ====================
     

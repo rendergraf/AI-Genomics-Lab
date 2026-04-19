@@ -1,6 +1,7 @@
 import * as React from "react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { ChevronDown } from "lucide-react";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -27,22 +28,32 @@ const sizeStyles = {
   lg: "h-12 px-4 text-base",
 };
 
+const iconSizeStyles = {
+  sm: "h-3 w-3",
+  md: "h-4 w-4",
+  lg: "h-5 w-5",
+};
+
 const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
-  ({ 
-    className, 
-    selectSize = "md", 
-    label,
-    placeholder,
-    error,
-    helperText,
-    options,
-    children,
-    ...props 
-  }, ref) => {
+  (
+    {
+      className,
+      selectSize = "md",
+      label,
+      placeholder,
+      error,
+      helperText,
+      options,
+      children,
+      ...props
+    },
+    ref,
+  ) => {
     const selectId = React.useId();
     const errorId = error ? `${selectId}-error` : undefined;
     const helperId = helperText ? `${selectId}-helper` : undefined;
-    const ariaDescribedBy = [errorId, helperId].filter(Boolean).join(' ') || undefined;
+    const ariaDescribedBy =
+      [errorId, helperId].filter(Boolean).join(" ") || undefined;
 
     const renderOptions = () => {
       if (options) {
@@ -54,8 +65,8 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
               </option>
             )}
             {options.map((option) => (
-              <option 
-                key={option.value} 
+              <option
+                key={option.value}
                 value={option.value}
                 disabled={option.disabled}
               >
@@ -69,25 +80,32 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
     };
 
     const selectElement = (
-      <select
-        ref={ref}
-        id={selectId}
-        className={cn(
-          "w-full bg-zinc-900/50 border border-zinc-700 rounded-md transition-colors duration-200 outline-none appearance-none cursor-pointer",
-          error ? "border-red-500 focus:border-red-500 focus:ring-red-500" : "focus:border-blue-500 focus:ring-blue-500",
-          sizeStyles[selectSize],
-          className
-        )}
-        aria-invalid={error ? "true" : undefined}
-        aria-describedby={ariaDescribedBy}
-        {...props}
-      >
-        {renderOptions()}
-      </select>
+      <div className="relative">
+        <select
+          ref={ref}
+          id={selectId}
+          className={cn(
+            "peer w-full bg-zinc-900/50 border border-zinc-700 rounded-xs transition-colors duration-200 outline-none appearance-none cursor-pointer",
+            error
+              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
+              : "hover:border-lime-300 focus:border-lime-300 focus:ring-lime-500 bg-zinc-900 text-lime-300 disabled:cursor-not-allowed focus:outline-none",
+            sizeStyles[selectSize],
+            className,
+          )}
+          aria-invalid={error ? "true" : undefined}
+          aria-describedby={ariaDescribedBy}
+          {...props}
+        >
+          {renderOptions()}
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+          <ChevronDown className={cn(iconSizeStyles[selectSize], "text-zinc-400 transition-transform duration-200 peer-focus:rotate-180")} />
+        </div>
+      </div>
     );
 
     const hasWrapper = label || error || helperText;
-    
+
     if (!hasWrapper) {
       return selectElement;
     }
@@ -95,7 +113,7 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
     return (
       <div className="w-full space-y-1">
         {label && (
-          <label 
+          <label
             htmlFor={selectId}
             className="block text-sm font-medium text-gray-300"
           >
@@ -104,24 +122,18 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         )}
         {selectElement}
         {error && (
-          <p 
-            id={errorId}
-            className="text-sm text-red-500"
-          >
+          <p id={errorId} className="text-sm text-red-500">
             {error}
           </p>
         )}
         {helperText && !error && (
-          <p 
-            id={helperId}
-            className="text-sm text-gray-400"
-          >
+          <p id={helperId} className="text-sm text-gray-400">
             {helperText}
           </p>
         )}
       </div>
     );
-  }
+  },
 );
 
 Select.displayName = "Select";
