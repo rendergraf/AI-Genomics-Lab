@@ -444,8 +444,24 @@ class DatabaseService:
             await conn.execute("""
                 INSERT INTO pipeline_settings (setting_key, setting_value, data_type, description) 
                 VALUES 
-                    ('default_read_length', '150', 'integer', 'Read length for alignment (bp)')
+                    ('default_read_length', '150', 'integer', 'Read length for alignment (bp)'),
+                    ('default_threads', '4', 'integer', 'Default number of threads for alignment'),
+                    ('max_memory_gb', '32', 'integer', 'Maximum memory allocation in GB'),
+                    ('strobealign_k', '15', 'integer', 'Strobealign k-mer size parameter'),
+                    ('strobealign_max_errors', '5', 'integer', 'Maximum errors allowed in alignment'),
+                    ('alignment_mode', 'standard', 'string', 'Alignment mode: standard or sensitive'),
+                    ('enable_secondary_alignments', 'true', 'boolean', 'Enable secondary alignments output')
                 ON CONFLICT (setting_key) DO NOTHING
+            """)
+            
+            # Insert or update read_length_options specifically
+            await conn.execute("""
+                INSERT INTO pipeline_settings (setting_key, setting_value, data_type, description) 
+                VALUES ('read_length_options', '75,100,150,250,300', 'string', 'Available read length options (comma-separated)')
+                ON CONFLICT (setting_key) DO UPDATE SET 
+                    setting_value = EXCLUDED.setting_value,
+                    data_type = EXCLUDED.data_type,
+                    description = EXCLUDED.description
             """)
             
             logger.info("Database schema initialized with authentication and settings tables")

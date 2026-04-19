@@ -91,6 +91,8 @@ export function AlignGenomeSection() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [availableGenomes, setAvailableGenomes] = useState<GenomeReference[]>([])
   const [loadingGenomes, setLoadingGenomes] = useState(false)
+  const [readLengthOptions, setReadLengthOptions] = useState<number[]>([75, 100, 150, 250, 300])
+  const [selectedReadLength, setSelectedReadLength] = useState<number>(150)
   const logsContainerRef = useRef<HTMLDivElement>(null)
   const API_URL = 'http://localhost:8000'
 
@@ -129,7 +131,7 @@ export function AlignGenomeSection() {
           setAvailableGenomes(result.data)
           // If no genome selected yet, select the first active one
           if (!pipelineConfig.referenceGenome && result.data.length > 0) {
-            const firstActive = result.data.find(g => g.is_active) || result.data[0]
+            const firstActive = result.data.find((g: GenomeReference) => g.is_active) || result.data[0]
             setPipelineConfig(prev => ({ ...prev, referenceGenome: firstActive.key }))
           }
         }
@@ -140,6 +142,39 @@ export function AlignGenomeSection() {
       }
     }
     loadGenomes()
+  }, [])
+
+  // Load pipeline settings (read length options)
+  useEffect(() => {
+    const loadPipelineSettings = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/settings/pipeline`)
+        if (response.ok) {
+          const settings = await response.json()
+          // Extract read_length_options
+          const optionsSetting = settings.find((s: any) => s.setting_key === 'read_length_options')
+          const defaultSetting = settings.find((s: any) => s.setting_key === 'default_read_length')
+          
+          if (optionsSetting) {
+            // Parse comma-separated string to array of numbers
+            const options = optionsSetting.setting_value.split(',').map((v: string) => parseInt(v.trim(), 10)).filter((n: number) => !isNaN(n))
+            if (options.length > 0) {
+              setReadLengthOptions(options)
+            }
+          }
+          
+          if (defaultSetting) {
+            const defaultVal = parseInt(defaultSetting.setting_value, 10)
+            if (!isNaN(defaultVal)) {
+              setSelectedReadLength(defaultVal)
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load pipeline settings:', error)
+      }
+    }
+    loadPipelineSettings()
   }, [])
 
   // Auto-scroll logs container when new logs arrive
@@ -179,7 +214,7 @@ export function AlignGenomeSection() {
       const response = await fetch(`${API_URL}/genome/index`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `genome_id=${pipelineConfig.referenceGenome}`,
+        body: `genome_id=${pipelineConfig.referenceGenome}&read_length=${selectedReadLength}`,
         signal: controller.signal
       })
 
@@ -471,6 +506,25 @@ export function AlignGenomeSection() {
                 ) : (
                   <option value="">No genome references available</option>
                 )}
+              </Select>
+            </div>
+
+            {/* Read Length */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <label className="text-sm font-medium">
+                  Read Length (bp)
+                </label>
+              </div>
+              <Select
+                value={selectedReadLength}
+                onChange={(e) => setSelectedReadLength(parseInt(e.target.value, 10))}
+              >
+                {readLengthOptions.map((length) => (
+                  <option key={length} value={length}>
+                    {length} bp
+                  </option>
+                ))}
               </Select>
             </div>
 

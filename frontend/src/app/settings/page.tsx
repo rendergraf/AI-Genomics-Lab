@@ -267,13 +267,22 @@ export default function SettingsPage() {
     try {
       switch (section) {
         case 'pipeline':
-          // Update pipeline setting (only default_read_length)
-          if (pipelineSettings.default_read_length) {
-            await api.updatePipelineSetting('default_read_length', {
-              setting_value: pipelineSettings.default_read_length.value.toString()
-            })
-            alert('Pipeline settings saved successfully')
+          // Update all pipeline settings
+          let savedCount = 0;
+          for (const [key, setting] of Object.entries(pipelineSettings)) {
+            const settingObj = setting as any;
+            if (settingObj && typeof settingObj === 'object' && 'value' in settingObj) {
+              try {
+                await api.updatePipelineSetting(key, {
+                  setting_value: settingObj.value.toString()
+                });
+                savedCount++;
+              } catch (err) {
+                console.error(`Failed to save setting ${key}:`, err);
+              }
+            }
           }
+          alert(`Pipeline settings saved successfully (${savedCount} settings updated)`);
           break
         case 'ai-providers':
           // TODO: implement AI provider save
@@ -457,9 +466,22 @@ export default function SettingsPage() {
         )
 
       case 'pipeline':
-        const PRESETS = [75, 100, 150, 250, 300];
+        // Get read length options from pipeline settings
+        const optionsStr = pipelineSettings.read_length_options?.value || '75,100,150,250,300';
+        const readLengthOptions = optionsStr.split(',').map((v: string) => parseInt(v.trim(), 10)).filter((n: number) => !isNaN(n));
+        const defaultOptions = [75, 100, 150, 250, 300]; // fallback if parsing fails
+        const PRESETS = readLengthOptions.length > 0 ? readLengthOptions : defaultOptions;
+        
         const currentValue = pipelineSettings.default_read_length?.value ?? 150;
         const isCustom = !PRESETS.includes(Number(currentValue)) || currentValue === '';
+        
+        // Additional pipeline settings
+        const defaultThreads = pipelineSettings.default_threads?.value ?? '4';
+        const maxMemory = pipelineSettings.max_memory_gb?.value ?? '32';
+        const strobealignK = pipelineSettings.strobealign_k?.value ?? '15';
+        const strobealignMaxErrors = pipelineSettings.strobealign_max_errors?.value ?? '5';
+        const alignmentMode = pipelineSettings.alignment_mode?.value ?? 'standard';
+        const enableSecondary = pipelineSettings.enable_secondary_alignments?.value ?? 'true';
         return (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold">Pipeline Configuration</h3>
@@ -507,12 +529,10 @@ export default function SettingsPage() {
                             setPipelineSettings(newSettings);
                           }}
                         >
-                          <option value={75}>75</option>
-                          <option value={100}>100</option>
-                          <option value={150}>150</option>
-                          <option value={250}>250</option>
-                          <option value={300}>300</option>
-                          <option value="custom">Custom</option>
+                           {PRESETS.map((length: number) => (
+                             <option key={length} value={String(length)}>{length}</option>
+                           ))}
+                           <option value="custom">Custom</option>
                         </Select>
                       </div>
                       {isCustom && (
@@ -548,13 +568,114 @@ export default function SettingsPage() {
                       Save Pipeline Settings
                     </Button>
                   </CardFooter>
-                </Card>
+                 </Card>
 
-                <Area>
-                  <h4 className="text-lg font-semibold mb-4">Validation Rules</h4>
+                 <Card>
+                   <CardHeader>
+                     <CardTitle>Performance Settings</CardTitle>
+                     <CardDescription>Advanced parameters for alignment performance</CardDescription>
+                   </CardHeader>
+                   <CardContent className="space-y-4">
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                       <div className="space-y-2">
+                         <label className="text-sm font-medium">Default Threads</label>
+                         <Input
+                           type="number"
+                           value={defaultThreads}
+                           onChange={(e) => {
+                             const newSettings = {...pipelineSettings};
+                             if (!newSettings.default_threads) newSettings.default_threads = {};
+                             newSettings.default_threads.value = e.target.value;
+                             setPipelineSettings(newSettings);
+                           }}
+                           min={1}
+                           max={64}
+                         />
+                       </div>
+                       <div className="space-y-2">
+                         <label className="text-sm font-medium">Max Memory (GB)</label>
+                         <Input
+                           type="number"
+                           value={maxMemory}
+                           onChange={(e) => {
+                             const newSettings = {...pipelineSettings};
+                             if (!newSettings.max_memory_gb) newSettings.max_memory_gb = {};
+                             newSettings.max_memory_gb.value = e.target.value;
+                             setPipelineSettings(newSettings);
+                           }}
+                           min={1}
+                           max={256}
+                         />
+                       </div>
+                       <div className="space-y-2">
+                         <label className="text-sm font-medium">Strobealign K-mer Size</label>
+                         <Input
+                           type="number"
+                           value={strobealignK}
+                           onChange={(e) => {
+                             const newSettings = {...pipelineSettings};
+                             if (!newSettings.strobealign_k) newSettings.strobealign_k = {};
+                             newSettings.strobealign_k.value = e.target.value;
+                             setPipelineSettings(newSettings);
+                           }}
+                           min={1}
+                           max={31}
+                         />
+                       </div>
+                       <div className="space-y-2">
+                         <label className="text-sm font-medium">Max Errors</label>
+                         <Input
+                           type="number"
+                           value={strobealignMaxErrors}
+                           onChange={(e) => {
+                             const newSettings = {...pipelineSettings};
+                             if (!newSettings.strobealign_max_errors) newSettings.strobealign_max_errors = {};
+                             newSettings.strobealign_max_errors.value = e.target.value;
+                             setPipelineSettings(newSettings);
+                           }}
+                           min={0}
+                           max={20}
+                         />
+                       </div>
+                       <div className="space-y-2">
+                         <label className="text-sm font-medium">Alignment Mode</label>
+                         <Select
+                           value={alignmentMode}
+                           onChange={(e) => {
+                             const newSettings = {...pipelineSettings};
+                             if (!newSettings.alignment_mode) newSettings.alignment_mode = {};
+                             newSettings.alignment_mode.value = e.target.value;
+                             setPipelineSettings(newSettings);
+                           }}
+                         >
+                           <option value="standard">Standard</option>
+                           <option value="sensitive">Sensitive</option>
+                         </Select>
+                       </div>
+                       <div className="space-y-2">
+                         <label className="text-sm font-medium">Secondary Alignments</label>
+                         <Select
+                           value={enableSecondary}
+                           onChange={(e) => {
+                             const newSettings = {...pipelineSettings};
+                             if (!newSettings.enable_secondary_alignments) newSettings.enable_secondary_alignments = {};
+                             newSettings.enable_secondary_alignments.value = e.target.value;
+                             setPipelineSettings(newSettings);
+                           }}
+                         >
+                           <option value="true">Enabled</option>
+                           <option value="false">Disabled</option>
+                         </Select>
+                       </div>
+                     </div>
+                   </CardContent>
+                 </Card>
+
+                 <Area>
+                   <h4 className="text-lg font-semibold mb-4">Validation Rules</h4>
                   <ul className="list-disc pl-5 space-y-2 text-sm text-muted-foreground">
-                    <li>Read length can be a standard value (75, 100, 150, 250, 300) or any custom positive integer</li>
-                    <li>Thread count is automatically determined based on available system cores</li>
+                     <li>Read length can be a standard value ({PRESETS.join(', ')}) or any custom positive integer</li>
+                     <li>Thread count can be configured (default: 4) or automatically determined based on available system cores</li>
                     <li>All numeric values must be positive integers</li>
                     <li>Changes require admin privileges</li>
                   </ul>

@@ -74,11 +74,12 @@ class BioPipelineClient:
             prefix = f"reference_genome/{genome_name}"
             
             # Define required files
+            read_length = int(os.getenv("DEFAULT_READ_LENGTH", "150"))
             required_files = [
                 f"{genome_name}.fa.gz",
                 f"{genome_name}.fa.gz.fai",
                 f"{genome_name}.fa.gz.gzi",
-                f"{genome_name}.fa.gz.sti"
+                f"{genome_name}.fa.gz.r{read_length}.sti"
             ]
             
             # Check local existence
