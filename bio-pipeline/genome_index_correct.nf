@@ -11,7 +11,6 @@ nextflow.enable.dsl = 2
 params.genome_id = "hg38"
 params.genome_url = null
 params.output_dir = "/datasets/reference_genome"
-params.threads = null
 params.read_length = 150
 params.minio_bucket = "genomics"
 params.minio_prefix = "reference_genome"
