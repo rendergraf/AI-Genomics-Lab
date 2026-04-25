@@ -4,6 +4,7 @@ Real implementation for MinIO integration
 """
 
 import os
+import io
 import logging
 from typing import Optional, Dict, Any, List
 from datetime import timedelta
@@ -32,15 +33,23 @@ class MinioService:
             self.public_connection_endpoint = self.public_endpoint
         self.public_url_endpoint = self.public_endpoint  # The endpoint that appears in the final URL
         self.bucket_default = "genomics"
-        # Bucket configuration from environment variables
+        # Consolidated bucket: all types map to the single 'genomics' bucket
+        # Organization happens via prefixes (e.g., reference_genome/, fastq/, clinical/)
         self.buckets = {
-            "fastq": os.getenv("MINIO_BUCKET_FASTQ", "fastq-files"),
-            "bam": os.getenv("MINIO_BUCKET_BAM", "bam-files"),
-            "vcf": os.getenv("MINIO_BUCKET_VCF", "vcf-files"),
-            "reports": os.getenv("MINIO_BUCKET_REPORTS", "reports"),
-            "annotations": os.getenv("MINIO_BUCKET_ANNOTATIONS", "annotations"),
-            "reference": os.getenv("MINIO_BUCKET_REFERENCE", "reference-genomes"),
+            "fastq": os.getenv("MINIO_BUCKET_FASTQ", "genomics"),
+            "bam": os.getenv("MINIO_BUCKET_BAM", "genomics"),
+            "vcf": os.getenv("MINIO_BUCKET_VCF", "genomics"),
+            "reports": os.getenv("MINIO_BUCKET_REPORTS", "genomics"),
+            "annotations": os.getenv("MINIO_BUCKET_ANNOTATIONS", "genomics"),
+            "reference": os.getenv("MINIO_BUCKET_REFERENCE", "genomics"),
             "genomics": os.getenv("MINIO_BUCKET_GENOMICS", "genomics"),
+        }
+        # Clinical directory structure inside the genomics bucket
+        # genomics/patient/{external_id}/case/{case_code}/sample/{sample_code}/
+        self.clinical_paths = {
+            "patient": "patient",
+            "case": "case",
+            "sample": "sample",
         }
         self.client = None
         self.public_client = None
@@ -108,25 +117,47 @@ class MinioService:
             raise
     
     def _ensure_all_buckets(self):
-        """Ensure all configured buckets exist"""
-        for bucket_type, bucket_name in self.buckets.items():
-            try:
-                if not self.client.bucket_exists(bucket_name):
-                    self.client.make_bucket(bucket_name)
-                    logger.info(f"Bucket '{bucket_name}' ({bucket_type}) created")
-                else:
-                    logger.debug(f"Bucket '{bucket_name}' ({bucket_type}) already exists")
-            except S3Error as e:
-                logger.error(f"Error ensuring bucket '{bucket_name}' ({bucket_type}): {e}")
-                raise
+        """Ensure the single consolidated genomics bucket exists"""
+        try:
+            if not self.client.bucket_exists(self.bucket_default):
+                self.client.make_bucket(self.bucket_default)
+                logger.info(f"Bucket '{self.bucket_default}' created")
+            else:
+                logger.debug(f"Bucket '{self.bucket_default}' already exists")
+        except S3Error as e:
+            logger.error(f"Error ensuring bucket '{self.bucket_default}': {e}")
+            raise
     
     def get_bucket(self, bucket_type: str = "genomics") -> str:
-        """Get bucket name for a given type"""
+        """Get bucket name for a given type. All types now map to 'genomics'."""
         if bucket_type in self.buckets:
             return self.buckets[bucket_type]
-        # If not found, use the provided bucket_type as bucket name
         logger.warning(f"Bucket type '{bucket_type}' not configured, using as bucket name")
         return bucket_type
+    
+    def get_clinical_path(self, patient_id: str = None, case_code: str = None, sample_code: str = None) -> str:
+        """Build a prefix path for clinical data inside the genomics bucket.
+        
+        Structure: patient/{external_id}/case/{case_code}/sample/{sample_code}
+        
+        Args:
+            patient_id: External patient identifier
+            case_code: Case code (unique within a patient)
+            sample_code: Sample code (unique within a case)
+        
+        Returns:
+            Prefix string like 'patient/ABC' or 'patient/ABC/case/CASE001/sample/SAMP001'
+        """
+        parts = []
+        if patient_id:
+            parts.extend(["patient", patient_id])
+        if case_code:
+            parts.extend(["case", case_code])
+        if sample_code:
+            parts.extend(["sample", sample_code])
+        if not parts:
+            return "patient"
+        return "/".join(parts)
     
     async def upload_file(self, file_path: str, bucket: str = None, object_name: str = None) -> Dict[str, Any]:
         bucket = bucket or self.bucket_default
@@ -376,6 +407,66 @@ class MinioService:
         
         return stream_generator()
     
+    async def create_empty_marker(self, path: str) -> None:
+        def _create():
+            self.client.put_object(
+                self.bucket_default,
+                path,
+                io.BytesIO(b""),
+                length=0,
+                content_type="text/plain"
+            )
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(self._executor, _create)
+
+    async def delete_prefix(self, prefix: str) -> None:
+        def _delete():
+            objects = self.client.list_objects(
+                self.bucket_default,
+                prefix=prefix,
+                recursive=True
+            )
+            for obj in objects:
+                self.client.remove_object(self.bucket_default, obj.object_name)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(self._executor, _delete)
+
+    async def upload_fastq_to_case(
+        self,
+        r1_stream,
+        r2_stream,
+        patient_external_id: str,
+        case_code: str,
+        sample_code: str,
+        r1_filename: str = "R1.fastq.gz",
+        r2_filename: str = "R2.fastq.gz"
+    ) -> Dict[str, str]:
+        cp = self.get_clinical_path(patient_external_id, case_code, sample_code)
+        r1_path = f"{cp}/raw/fastq/{r1_filename}"
+        r2_path = f"{cp}/raw/fastq/{r2_filename}"
+
+        def _upload(stream, path):
+            data = stream.read()
+            self.client.put_object(
+                self.bucket_default, path, io.BytesIO(data), len(data),
+                content_type="application/gzip"
+            )
+            return path
+
+        loop = asyncio.get_event_loop()
+        r1_result = await loop.run_in_executor(self._executor, _upload, r1_stream, r1_path)
+        r2_result = await loop.run_in_executor(self._executor, _upload, r2_stream, r2_path)
+        return {"r1": r1_result, "r2": r2_result}
+
+    def get_pipeline_output_path(self, case_code: str, run_id: int, module: str) -> str:
+        return f"pipeline/run_{run_id}/{module}/"
+
+    async def list_case_files(self, case_code: str, prefix_pattern: str = "") -> List[Dict[str, Any]]:
+        full_prefix = f"case/{case_code}"
+        if prefix_pattern:
+            full_prefix = f"{full_prefix}/{prefix_pattern}"
+        return await self.list_objects_with_info(prefix=full_prefix)
+
     def get_object_url(self, bucket: str, object_name: str) -> str:
         return f"s3://{bucket}/{object_name}"
 

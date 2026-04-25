@@ -31,6 +31,8 @@ from services.minio_service import get_minio_service
 from services.auth_service import get_auth_service
 from minio.error import S3Error
 
+from api.v1 import router as v1_router
+
 # Import Pydantic for request/response models
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List, Dict, Any
@@ -281,6 +283,9 @@ Quick Start:
         {"name": "Genome", "description": "🧬 Genome indexing endpoints"},
         {"name": "Authentication", "description": "🔐 User authentication and authorization"},
         {"name": "Settings", "description": "⚙️ Platform configuration and management"},
+        {"name": "Patients", "description": "👤 Patient management"},
+        {"name": "Cases", "description": "📋 Clinical case management"},
+        {"name": "Samples", "description": "🧪 Clinical sample management"},
     ]
 )
 
@@ -292,6 +297,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Include v1 API router
+app.include_router(v1_router, prefix="/api")
 
 
 @app.get("/", tags=["Health"], summary="Root endpoint", description="""

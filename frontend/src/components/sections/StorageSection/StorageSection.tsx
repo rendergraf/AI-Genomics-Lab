@@ -373,7 +373,7 @@ export function StorageSection() {
 
         <div className="text-sm text-muted-foreground">
           Synchronizes reference genomes from local filesystem to MinIO object storage.
-          Files are stored in the 'reference-genomes' bucket with metadata.
+          Files are stored in the 'genomics' bucket with metadata (reference_genome/ prefix).
         </div>
       </Area>
 

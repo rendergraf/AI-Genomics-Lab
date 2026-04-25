@@ -1,0 +1,1 @@
+export { CreatePatientDialog } from './CreatePatientDialog';

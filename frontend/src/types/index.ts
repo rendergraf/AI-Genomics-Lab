@@ -81,3 +81,9 @@ export interface TabConfig {
   label: string
   icon: string
 }
+
+export type { Patient, CreatePatientData } from './patient';
+export type { CaseData, ClinicalCase } from './case';
+export type { ClinicalSample, SequencingRun, FastqFile } from './sample';
+export type { Variant, ClinicalReport, Biomarker } from './variant';
+export type { PipelineModule, PipelineRun, PipelineLog, PipelineModuleStatus } from './pipeline';

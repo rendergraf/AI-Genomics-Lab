@@ -14,6 +14,7 @@ services:
     volumes:
       - ../api:/app/api
       - ../services:/app/services
+      - ../core:/app/core
       - ../bio-pipeline:/bio-pipeline
       - ../datasets:/datasets
       - datasets-logs:/datasets/logs
@@ -26,19 +27,19 @@ services:
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=genomics
       - MINIO_SECRET_KEY=genomics
-      # MinIO Buckets Configuration
-      - MINIO_BUCKET_FASTQ=fastq-files
-      - MINIO_BUCKET_BAM=bam-files
-      - MINIO_BUCKET_VCF=vcf-files
-      - MINIO_BUCKET_REPORTS=reports
-      - MINIO_BUCKET_ANNOTATIONS=annotations
+      # MinIO Buckets Configuration (all consolidated to single 'genomics' bucket)
+      - MINIO_BUCKET_FASTQ=genomics
+      - MINIO_BUCKET_BAM=genomics
+      - MINIO_BUCKET_VCF=genomics
+      - MINIO_BUCKET_REPORTS=genomics
+      - MINIO_BUCKET_ANNOTATIONS=genomics
       - MINIO_BUCKET_REFERENCE=genomics
       - MINIO_BUCKET_GENOMICS=genomics
       # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - NXF_WORK=/nextflow-work
       - JWT_SECRET_KEY=your-secret-key-change-in-production
       - MINIO_PUBLIC_ENDPOINT=host.docker.internal:9000
-    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     depends_on:
       - postgres
       - neo4j
@@ -118,14 +119,13 @@ services:
       echo 'Waiting for MinIO to be ready...';
       sleep 10;
       mc alias set myminio http://minio:9000 genomics genomics;
-      mc mb --ignore-existing myminio/fastq-files;
-      mc mb --ignore-existing myminio/bam-files;
-      mc mb --ignore-existing myminio/vcf-files;
-      mc mb --ignore-existing myminio/reports;
-      mc mb --ignore-existing myminio/annotations;
-      mc mb --ignore-existing myminio/reference-genomes;
+      echo 'Creating consolidated genomics bucket...';
       mc mb --ignore-existing myminio/genomics;
-      echo 'MinIO buckets created successfully';
+      echo 'Bucket created. Creating clinical base directories...';
+      for dir in patient; do
+        mc pipe myminio/genomics/\$dir/ < /dev/null;
+      done;
+      echo 'MinIO initialization complete: bucket=genomics, patient/ base dir created';
       exit 0;
       "
     networks:
@@ -158,12 +158,12 @@ services:
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=genomics
       - MINIO_SECRET_KEY=genomics
-      # MinIO Buckets Configuration
-      - MINIO_BUCKET_FASTQ=fastq-files
-      - MINIO_BUCKET_BAM=bam-files
-      - MINIO_BUCKET_VCF=vcf-files
-      - MINIO_BUCKET_REPORTS=reports
-      - MINIO_BUCKET_ANNOTATIONS=annotations
+      # MinIO Buckets Configuration (all consolidated to single 'genomics' bucket)
+      - MINIO_BUCKET_FASTQ=genomics
+      - MINIO_BUCKET_BAM=genomics
+      - MINIO_BUCKET_VCF=genomics
+      - MINIO_BUCKET_REPORTS=genomics
+      - MINIO_BUCKET_ANNOTATIONS=genomics
       - MINIO_BUCKET_REFERENCE=genomics
       - MINIO_BUCKET_GENOMICS=genomics
     networks:
@@ -186,7 +186,7 @@ services:
     environment:
       - NODE_ENV=development
       - API_HOST=ai-genomics-api
-      - NEXT_PUBLIC_API_URL=http://localhost:3000
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       - api
     networks:
