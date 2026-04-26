@@ -30,7 +30,7 @@ export const Step7RunPipeline: React.FC = () => {
       <div className="mb-6">
         <h3 className="text-lg font-medium text-gray-900">Pipeline Module Selection</h3>
         <p className="text-sm text-gray-500 mt-1">
-          Select the bioinformatics pipeline modules to execute.
+          Select the bioinformatics analysis modules to run on the sequenced samples.
         </p>
       </div>
 

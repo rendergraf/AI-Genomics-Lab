@@ -20,9 +20,9 @@ export const WizardSidebar: React.FC = () => {
   const { currentStep, goToStep } = useCaseWizardStore();
 
   return (
-    <aside className="w-64 bg-gray-50 border-r border-gray-200 min-h-full flex flex-col">
+    <aside className="w-64 bg-gray-900 border-r border-gray-200 min-h-full flex flex-col">
       <div className="p-4 border-b border-gray-200">
-        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+        <h2 className="text-xs font-semibold text-gray-200 uppercase tracking-wider">
           Case Creation Wizard
         </h2>
       </div>
@@ -38,9 +38,9 @@ export const WizardSidebar: React.FC = () => {
               disabled={!isCompleted && !isActive}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                 isActive
-                  ? 'bg-blue-50 text-blue-700 font-medium'
+                  ? 'bg-lime-50 text-lime-700 font-medium'
                   : isCompleted
-                  ? 'text-gray-600 hover:bg-gray-100 cursor-pointer'
+                  ? 'text-gray-50 hover:bg-gray-100 cursor-pointer'
                   : 'text-gray-400 cursor-not-allowed'
               }`}
             >

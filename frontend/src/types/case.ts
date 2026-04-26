@@ -7,6 +7,7 @@ export interface CaseData {
   metastatic_sites: string[];
   clinical_question: string;
   requested_modules: string[];
+  genome_build: string;
 }
 
 export interface ClinicalCase {

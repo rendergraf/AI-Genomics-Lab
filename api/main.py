@@ -127,6 +127,12 @@ class GenomeReferenceResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+class SpeciesResponse(BaseModel):
+    id: int
+    name: str
+    tier: int
+    display_order: int
+
 class PipelineSettingUpdate(BaseModel):
     setting_value: str
     data_type: Optional[str] = None
@@ -437,6 +443,21 @@ async def check_genome_indexed(genome_id: str) -> dict:
         "storage": "minio",  # Indicate that files are stored in MinIO
         "paths": {key: f"s3://{bucket}/{prefix}/{filename}" for key, filename in files.items()}
     }
+
+
+@app.get("/api/v1/indexed-genomes", tags=["Genome"], summary="Get indexed (aligned) Homo sapiens genomes")
+async def get_indexed_genomes_db():
+    """Get list of ready indexed Homo sapiens genomes from the indexed_genomes table"""
+    db_service = get_database_service()
+    genomes = await db_service.get_ready_genomes("Homo sapiens")
+    return [{
+        "id": g.id,
+        "name": g.name,
+        "species": g.species,
+        "build": g.build,
+        "status": g.status,
+        "file_path": g.file_path
+    } for g in genomes]
 
 
 @app.get("/genome/indexed", tags=["Genome"], summary="Get indexing status for all genomes")
@@ -882,6 +903,16 @@ async def get_current_user_info(current_user: Dict[str, Any] = Depends(get_curre
     return current_user
 
 # ==================== SETTINGS ENDPOINTS ====================
+
+# Species
+@app.get("/api/settings/species", tags=["Settings"], summary="Get species list")
+async def get_species(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get all species ordered by tier"""
+    db_service = get_database_service()
+    species_list = await db_service.get_species()
+    return [SpeciesResponse(**s.__dict__) for s in species_list]
 
 # Genome References
 @app.get("/api/settings/genome-references", tags=["Settings"], summary="Get genome references")

@@ -11,7 +11,7 @@ export const Step10ReportGeneration: React.FC = () => {
       <div className="mb-6">
         <h3 className="text-lg font-medium text-gray-900">Clinical Report</h3>
         <p className="text-sm text-gray-500 mt-1">
-          Review and finalize the clinical report.
+          Review the case summary and generate the final clinical report.
         </p>
       </div>
 

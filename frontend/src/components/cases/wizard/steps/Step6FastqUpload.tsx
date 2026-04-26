@@ -48,7 +48,7 @@ export const Step6FastqUpload: React.FC = () => {
       <div className="mb-6">
         <h3 className="text-lg font-medium text-gray-900">FASTQ File Upload</h3>
         <p className="text-sm text-gray-500 mt-1">
-          Upload FASTQ sequencing files for the registered samples.
+          Link FASTQ sequencing files to the registered samples for analysis.
         </p>
       </div>
 

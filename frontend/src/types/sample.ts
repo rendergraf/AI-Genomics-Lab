@@ -1,7 +1,8 @@
 export type SamplePurpose = 'tumor' | 'normal' | 'germline' | 'rna' | 'ctdna' | 'relapse' | 'baseline' | 'followup';
-export type AnatomicalSite = 'primary_tumor' | 'liver_metastasis' | 'lung_metastasis' | 'bone_metastasis' | 'brain_metastasis' | 'lymph_node_metastasis' | 'peritoneal_metastasis' | 'pleural_effusion' | 'bone_marrow' | 'blood' | 'csf' | 'other';
+export type AnatomicalSite = 'primary_tumor' | 'liver_metastasis' | 'lung_metastasis' | 'bone_metastasis' | 'brain_metastasis' | 'lymph_node_metastasis' | 'peritoneal_metastasis' | 'pleural_effusion' | 'bone_marrow' | 'blood' | 'csf' | 'saliva' | 'other';
 export type PreservationMethod = 'ffpe' | 'fresh_frozen' | 'blood' | 'plasma' | 'bone_marrow_aspirate' | 'saliva' | 'other';
 export type QualityStatus = 'pending' | 'passed' | 'failed' | 'low_quality' | 'contaminated' | 'insufficient_material';
+export type SequencingIntent = 'somatic_profiling' | 'germline_testing' | 'fusion_detection' | 'mrd_monitoring' | 'resistance_analysis' | 'relapse_characterization';
 
 export const SAMPLE_PURPOSE_LABELS: Record<SamplePurpose, string> = {
   tumor: 'Tumor',
@@ -26,7 +27,17 @@ export const ANATOMICAL_SITE_LABELS: Record<AnatomicalSite, string> = {
   bone_marrow: 'Bone Marrow',
   blood: 'Blood',
   csf: 'CSF',
+  saliva: 'Saliva',
   other: 'Other',
+};
+
+export const SEQUENCING_INTENT_LABELS: Record<SequencingIntent, string> = {
+  somatic_profiling: 'Somatic Profiling',
+  germline_testing: 'Germline Testing',
+  fusion_detection: 'Fusion Detection',
+  mrd_monitoring: 'MRD Monitoring',
+  resistance_analysis: 'Resistance Analysis',
+  relapse_characterization: 'Relapse Characterization',
 };
 
 export const PRESERVATION_LABELS: Record<PreservationMethod, string> = {
@@ -68,21 +79,41 @@ export interface ClinicalSample {
   notes?: string;
 
   sample_purpose?: SamplePurpose;
+  sequencing_intent?: SequencingIntent;
   tumor_content?: number;
   matched_normal?: boolean;
   matched_normal_sample_id?: number | null;
   anatomical_site?: AnatomicalSite | string;
   pathology_notes?: string;
   quality_status?: QualityStatus;
+  pathology_reviewed?: boolean;
+  pathology_reviewer?: string;
+  pathology_review_date?: string;
 }
+
+export type LibraryType = 'dna' | 'rna' | 'cfdna' | 'ffpe_dna' | 'fresh_frozen_dna';
+
+export const LIBRARY_TYPE_LABELS: Record<LibraryType, string> = {
+  dna: 'DNA',
+  rna: 'RNA',
+  cfdna: 'cfDNA',
+  ffpe_dna: 'FFPE DNA',
+  fresh_frozen_dna: 'Fresh Frozen DNA',
+};
 
 export interface SequencingRun {
   id?: number;
   sample_id?: number;
+  sample_code?: string;
   platform: 'illumina' | 'ont' | 'pacbio' | 'other';
   sequencing_type: 'wgs' | 'wes' | 'rna_seq' | 'targeted';
   read_type: 'single_end' | 'paired_end';
   coverage_target?: number;
+  library_type?: LibraryType;
+  assay_kit?: string;
+  paired_normal_sample_code?: string;
+  insert_size?: number;
+  sequencing_notes?: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   created_at?: string;
 }

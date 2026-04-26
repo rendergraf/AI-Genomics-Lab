@@ -35,3 +35,7 @@ export type { StatCardProps, StatCardIconSize } from "./StatCard";
 // ButtonTab
 export { ButtonTab, buttonTabVariants } from "./ButtonTab";
 export type { ButtonTabProps, ButtonTabVariant, ButtonTabSize } from "./ButtonTab";
+
+// Tooltip
+export { Tooltip } from "./Tooltip/Tooltip";
+export type { TooltipProps } from "./Tooltip/Tooltip";

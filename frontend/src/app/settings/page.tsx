@@ -84,6 +84,7 @@ export default function SettingsPage() {
   const [auditLogs, setAuditLogs] = useState<any[]>([])
   const [systemHealth, setSystemHealth] = useState<any>({})
   const [users, setUsers] = useState<any[]>([])
+  const [speciesList, setSpeciesList] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -111,6 +112,8 @@ export default function SettingsPage() {
           case 'genome-references':
             const refs = await api.getGenomeReferences()
             if (refs.data) setGenomeReferences(refs.data)
+            const species = await api.getSpecies()
+            if (species.data) setSpeciesList(species.data)
             break
           case 'pipeline':
             const pipeline = await api.getPipelineSettings()
@@ -344,11 +347,27 @@ export default function SettingsPage() {
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Species</label>
-                      <Input
+                      <Select
                         value={genomeFormData.species}
                         onChange={(e) => setGenomeFormData({...genomeFormData, species: e.target.value})}
-                        placeholder="e.g., Homo sapiens"
-                      />
+                      >
+                        <option value="">Select a species...</option>
+                        <optgroup label="Tier 1 — Clinical Human Genomics">
+                          {speciesList.filter((s: any) => s.tier === 1).map((s: any) => (
+                            <option key={s.id} value={s.name}>{s.name}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Tier 2 — Research Models">
+                          {speciesList.filter((s: any) => s.tier === 2).map((s: any) => (
+                            <option key={s.id} value={s.name}>{s.name}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Tier 3 — Microbial / Special">
+                          {speciesList.filter((s: any) => s.tier === 3).map((s: any) => (
+                            <option key={s.id} value={s.name}>{s.name}</option>
+                          ))}
+                        </optgroup>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Build</label>

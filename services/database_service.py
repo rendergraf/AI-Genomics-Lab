@@ -192,6 +192,15 @@ class UserRole:
 
 
 @dataclass
+class Species:
+    """Species reference data model"""
+    id: int
+    name: str
+    tier: int
+    display_order: int
+
+
+@dataclass
 class GenomeReference:
     """Genome reference data model (enhanced)"""
     id: int
@@ -587,6 +596,29 @@ class DatabaseService:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
+            """)
+            
+            # Create species reference table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS species (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(100) UNIQUE NOT NULL,
+                    tier INTEGER NOT NULL,
+                    display_order INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            
+            # Seed species data (idempotent)
+            await conn.execute("""
+                INSERT INTO species (name, tier, display_order) VALUES
+                    ('Homo sapiens', 1, 1),
+                    ('Mus musculus', 2, 2),
+                    ('Rattus norvegicus', 2, 3),
+                    ('Danio rerio', 2, 4),
+                    ('E. coli', 3, 5),
+                    ('Yeast', 3, 6),
+                    ('Mycobacterium tuberculosis', 3, 7)
+                ON CONFLICT (name) DO NOTHING
             """)
             
             # Create pipeline_settings table
@@ -1528,6 +1560,25 @@ class DatabaseService:
             
             return [ReferenceGenome(**dict(row)) for row in rows]
     
+    async def get_ready_genomes(self, species: Optional[str] = None) -> List[ReferenceGenome]:
+        """Get ready indexed genomes, optionally filtered by species"""
+        async with self.pool.acquire() as conn:
+            if species:
+                rows = await conn.fetch("""
+                    SELECT id, name, species, build, file_path, gz_path, fai_path, gzi_path, sti_path, status, created_at, updated_at
+                    FROM indexed_genomes
+                    WHERE status = 'ready' AND species = $1
+                    ORDER BY created_at DESC
+                """, species)
+            else:
+                rows = await conn.fetch("""
+                    SELECT id, name, species, build, file_path, gz_path, fai_path, gzi_path, sti_path, status, created_at, updated_at
+                    FROM indexed_genomes
+                    WHERE status = 'ready'
+                    ORDER BY created_at DESC
+                """)
+            return [ReferenceGenome(**dict(row)) for row in rows]
+    
     async def get_reference_genome(self, genome_id: int) -> Optional[ReferenceGenome]:
         """Get a reference genome by ID"""
         async with self.pool.acquire() as conn:
@@ -2047,6 +2098,16 @@ class DatabaseService:
             """, ref_id)
             
             return result == "DELETE 1"
+    
+    async def get_species(self) -> List[Species]:
+        """Get all species ordered by tier and display_order"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, name, tier, display_order
+                FROM species
+                ORDER BY tier, display_order
+            """)
+            return [Species(**dict(row)) for row in rows]
     
     # ==================== PIPELINE SETTINGS ====================
     

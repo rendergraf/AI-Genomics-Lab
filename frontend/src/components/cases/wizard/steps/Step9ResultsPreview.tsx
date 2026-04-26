@@ -17,7 +17,7 @@ export const Step9ResultsPreview: React.FC = () => {
       <div className="mb-6">
         <h3 className="text-lg font-medium text-gray-900">Results Preview</h3>
         <p className="text-sm text-gray-500 mt-1">
-          Preview the identified variants and biomarkers.
+          Review identified variants, biomarkers, and genomic findings before report generation.
         </p>
       </div>
 

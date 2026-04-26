@@ -44,6 +44,7 @@ const initialCaseData: CaseData = {
   metastatic_sites: [],
   clinical_question: '',
   requested_modules: [],
+  genome_build: 'GRCh38 (hg38)',
 };
 
 const initialState = {
